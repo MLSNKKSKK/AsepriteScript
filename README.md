@@ -6,12 +6,18 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
 | --- | --- |
 | [New Sprite from Preset](#new-sprite-from-preset) | Creates a new sprite from a list of canvas sizes you've saved. |
 | [Import GIF as Layer](#import-gif-as-layer) | Imports a GIF animation into the open sprite as a layer. |
+| [Replace Color in All Layers](#replace-color-in-all-layers) | Replaces one color with another in every layer and frame at once. |
 
 ## Installation
 
-1. Download the `.lua` file you want: [`New Sprite from Preset.lua`](New%20Sprite%20from%20Preset.lua) or [`Import GIF as Layer.lua`](Import%20GIF%20as%20Layer.lua). (To get both at once, use **Code > Download ZIP** on this page.)
+1. Download the `.lua` files you want:
+   - [`New Sprite from Preset.lua`](New%20Sprite%20from%20Preset.lua)
+   - [`Import GIF as Layer.lua`](Import%20GIF%20as%20Layer.lua)
+   - [`Replace Color in All Layers.lua`](Replace%20Color%20in%20All%20Layers.lua)
+
+   To get them all at once, use **Code > Download ZIP** on this page.
 2. In Aseprite, choose **File > Scripts > Open Scripts Folder**.
-3. Copy the `.lua` file into that folder.
+3. Copy the `.lua` files into that folder.
 4. Choose **File > Scripts > Rescan Scripts Folder** (or restart Aseprite).
 
 The scripts now appear under **File > Scripts**. You can also give them keyboard shortcuts in **Edit > Keyboard Shortcuts**.
@@ -100,6 +106,29 @@ When run without the UI, pass the options with `--script-param` (before `--scrip
 | `dest` | `current` to draw on the active layer. Default: new layer. |
 | `size` | `fit`, `cover` (Fill Canvas) or `stretch`. Default: actual size. |
 | `method` | `bilinear`. Default: nearest neighbor. |
+
+## Replace Color in All Layers
+
+Replaces one color with another in every layer and every frame of the sprite at once.
+
+- Includes layers inside groups and hidden layers
+- Skips locked, tilemap and reference layers
+- Each pixel keeps its original alpha, so semi-transparent pixels stay semi-transparent
+- The whole replacement is a single undo step (**Edit > Undo** / Ctrl+Z)
+
+### Usage
+
+Open an RGB sprite (to convert one, use **Sprite > Color Mode > RGB Color**), then run **File > Scripts > Replace Color in All Layers**.
+
+| Field | Description |
+| --- | --- |
+| **From** | The color to replace. Starts as the current foreground color. |
+| **To** | The new color. Starts as the current background color. If it's semi-transparent, replaced pixels get that much more transparent. |
+| **Tolerance** | How close a color must be to **From** to be replaced (0–255, checked separately for red, green and blue). At 0, only the exact color is replaced. |
+
+Click **Replace**. When it's done, a message shows how many pixels were replaced (and how many layers were skipped, if any).
+
+When run without the UI, the script replaces the foreground color with the background color at tolerance 0.
 
 ## Requirements
 
