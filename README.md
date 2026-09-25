@@ -1,5 +1,7 @@
 # Aseprite Scripts
 
+English | [日本語](README.ja.md)
+
 A small collection of [Aseprite](https://www.aseprite.org/) scripts.
 
 | Script | What it does |
@@ -23,6 +25,8 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
 4. Choose **File > Scripts > Rescan Scripts Folder** (or restart Aseprite).
 
 The scripts now appear under **File > Scripts**. You can also give them keyboard shortcuts in **Edit > Keyboard Shortcuts**.
+
+The [`ja`](ja) folder has Japanese versions of the same scripts. You only need one language version of each.
 
 ## New Sprite from Preset
 
