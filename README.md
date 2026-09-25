@@ -58,3 +58,7 @@ Each line is `name,width,height`. Lines starting with `#` are ignored. You can e
 ## Requirements
 
 Aseprite with Lua scripting support (v1.3 or later recommended).
+
+## License
+
+[MIT](LICENSE)
