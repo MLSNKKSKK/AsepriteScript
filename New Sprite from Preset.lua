@@ -8,7 +8,6 @@ local PRESET_FILE = app.fs.joinPath(app.fs.userConfigPath, "canvas_presets.txt")
 
 -- Presets written to the file when it doesn't exist yet
 local DEFAULT_PRESETS = {
-  { name = "Character", w = 220, h = 360 },
   { name = "16px", w = 16, h = 16 },
   { name = "32px", w = 32, h = 32 },
   { name = "64px", w = 64, h = 64 },

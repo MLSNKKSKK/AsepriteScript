@@ -47,7 +47,6 @@ The file is created with these default presets the first time the script runs:
 
 ```
 # name,width,height (one per line)
-Character,220,360
 16px,16,16
 32px,32,32
 64px,64,64
