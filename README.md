@@ -7,6 +7,7 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
 | [New Sprite from Preset](#new-sprite-from-preset) | Creates a new sprite from a list of canvas sizes you've saved. |
 | [Import GIF as Layer](#import-gif-as-layer) | Imports a GIF animation into the open sprite as a layer. |
 | [Replace Color in All Layers](#replace-color-in-all-layers) | Replaces one color with another in every layer and frame at once. |
+| [Create Effect Layer](#create-effect-layer) | Adds a color layer shaped like the active layer, with a blend mode such as Multiply. |
 
 ## Installation
 
@@ -14,6 +15,7 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
    - [`New Sprite from Preset.lua`](New%20Sprite%20from%20Preset.lua)
    - [`Import GIF as Layer.lua`](Import%20GIF%20as%20Layer.lua)
    - [`Replace Color in All Layers.lua`](Replace%20Color%20in%20All%20Layers.lua)
+   - [`Create Effect Layer.lua`](Create%20Effect%20Layer.lua)
 
    To get them all at once, use **Code > Download ZIP** on this page.
 2. In Aseprite, choose **File > Scripts > Open Scripts Folder**.
@@ -129,6 +131,31 @@ Open an RGB sprite (to convert one, use **Sprite > Color Mode > RGB Color**), th
 Click **Replace**. When it's done, a message shows how many pixels were replaced (and how many layers were skipped, if any).
 
 When run without the UI, the script replaces the foreground color with the background color at tolerance 0.
+
+## Create Effect Layer
+
+Creates an "effect layer" right above the active layer: the same shape as the active layer's pixels, filled with one color and set to a blend mode such as Multiply. Handy for shading, tinting or lighting a character without painting on the original layer.
+
+- Covers every frame the active layer has art on
+- The new layer is named after the blend mode and the source layer, e.g. `Multiply (Layer 1)`
+- The whole operation is a single undo step (**Edit > Undo** / Ctrl+Z)
+
+### Usage
+
+Open an RGB sprite (to convert one, use **Sprite > Color Mode > RGB Color**), select a regular layer (not a group or tilemap), then run **File > Scripts > Create Effect Layer**.
+
+| Field | Description |
+| --- | --- |
+| **Color** | The fill color. Starts as the current foreground color. |
+| **Blend Mode** | The new layer's blend mode (Multiply by default). Uses the same names as Aseprite's Layer Properties. |
+| **Opacity** | The new layer's opacity (0–255). |
+| **Match the source layer's transparency** | When checked, semi-transparent pixels on the source layer stay semi-transparent on the effect layer. When unchecked, every visible pixel gets the color as is, ignoring the source layer's transparency. |
+
+Click **Create**.
+
+The effect layer is a copy made at that moment: if you edit the original layer later, the effect layer doesn't follow. You can change its blend mode and opacity afterwards in **Layer > Properties**.
+
+When run without the UI, the script uses the foreground color, Multiply and full opacity.
 
 ## Requirements
 
