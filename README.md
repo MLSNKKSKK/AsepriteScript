@@ -189,19 +189,19 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 
 | On the canvas | What it does |
 | --- | --- |
-| Click an empty spot | Starts a new line, or adds a point to the end of the line you're drawing (or the selected line). |
+| Click an empty spot | Starts a new shape, or adds a point to the end of the shape you're drawing (or the selected shape). |
 | Press on an empty spot and drag | Adds a point and pulls out its handles, bending the line. |
-| Click the last point of the line you're drawing, or press **Enter** | Finishes the line. The next click on an empty spot starts a new one. |
+| Click the last point of the shape you're drawing, or press **Enter** | Finishes the shape. The next click on an empty spot starts a new one. |
 | Drag a point | Moves the point. |
 | Drag a handle | Changes how the line bends. The handle on the other side turns with it, unless **Move one handle only** is checked. |
 | Click a line | Adds a point there without changing the shape. |
-| Drag a line | Moves the whole line. |
+| Drag a line | Moves the whole shape. |
 | Click a point | Selects it (it gets a white outline). |
 | **Delete** / **Backspace** | Deletes the selected point. |
 | **Ctrl+Z** / **Ctrl+Y** | Undo / redo. Your recent changes to the lines are undone first, then Aseprite's own history. |
-| **Esc** | Cancels the drag in progress, or finishes / deselects the line. |
+| **Esc** | Cancels the drag in progress, or finishes / deselects the shape. |
 
-While you're drawing a line, clicks only add to that line: other lines can't be grabbed, so you can start on another line's point or cross over a line. After you finish the line, clicking another line selects it for editing.
+While you're drawing a shape, clicks only add to that shape: other shapes can't be grabbed, so you can start on another shape's point or cross over its line. After you finish the shape, clicking another shape's line selects it for editing.
 
 There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
 
@@ -209,33 +209,35 @@ While you edit, the points and handles are shown on the curve layer in bright gr
 
 Grayscale sprites can't show green, and neither can Indexed sprites whose palette has no green, so there the guides are black and white instead: points have a black outline and a white center (the selected point the other way around), handles are dotted in black and white, and each handle end is whichever of black or white stands out from the picture. Adding a bright green to an Indexed palette makes the guides green. They disappear when you leave the layer. Zoom in to work comfortably.
 
+The panel's first section, **Selected Shape**, holds the settings of the selected shape. It has two groups: **Line** for the line around the shape, and **Fill** for its inside.
+
 | Panel | Description |
 | --- | --- |
-| **Color** | The line color. Starts as the current foreground color. |
-| **Width** | The line width in pixels (1–32). |
-| **Draw the line** | Turn it off to draw only the fill, without a line around it. |
-| **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines (the line's own points are always kept, so the corners of a square stay sharp). Not used with antialiasing. |
-| **Antialias (smooth edges)** | Smooths the edges of the line and the fill with partly transparent pixels. Where lines overlap, they blend with each other. RGB and Grayscale only: Indexed sprites can't have partly transparent pixels, so there it's turned off. |
-| **Connect the ends** | Joins the last point of the selected line back to the first. |
-| **Fill the inside** | Fills the inside of the line. A line whose ends aren't connected is filled as if they were joined by a straight line. The line is drawn on top of the fill. |
-| **Fill Color** | The fill color. |
+| **Connect the ends** | Joins the last point of the selected shape back to the first. |
+| **Antialias (smooth edges)** | Smooths the edges of the line and the fill with partly transparent pixels. Where shapes overlap, they blend with each other. RGB and Grayscale only: Indexed sprites can't have partly transparent pixels, so there it's turned off. |
+| **Line**: **Draw the line** | Turn it off to draw only the fill, without a line around it. |
+| **Line**: **Color** | The line color. Starts as the current foreground color. |
+| **Line**: **Width** | The line width in pixels (1–32). |
+| **Line**: **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines (the shape's own points are always kept, so the corners of a square stay sharp). Not used with antialiasing. |
+| **Fill**: **Fill the inside** | Fills the inside of the shape. A shape whose ends aren't connected is filled as if they were joined by a straight line. The line is drawn on top of the fill. |
+| **Fill**: **Color** | The fill color. |
 | **Move one handle only** | Dragging a handle doesn't turn the one on the other side, so you can make sharp corners. |
-| **Show guides** | Shows or hides the points and handles, to check how the line really looks. |
-| **New Line** | Finishes the current line, so the next click starts a new one. |
-| **Delete Line** / **Delete Point** | Deletes the selected line / point. |
+| **Show guides** | Shows or hides the points and handles, to check how the shapes really look. |
+| **New Shape** | Finishes the current shape, so the next click starts a new one. |
+| **Delete Shape** / **Delete Point** | Deletes the selected shape / point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
-| **Undo** / **Redo** | Undo / redo your changes to the lines. |
-| **Transform Box**, **Numeric...**, **Flip**, **Rotate**, **Keep proportions** | Transform the lines (see below). |
+| **Undo** / **Redo** | Undo / redo your changes to the shapes. |
+| **Transform Box**, **Numeric...**, **Flip**, **Rotate**, **Keep proportions** | Transform the shapes (see below). |
 | **Stop Editing** | Stops editing the layer so you can use Aseprite's tools on it (for example the Move tool). Closing the panel does the same. Selecting the layer again, or **Layer > Edit Curves**, starts editing again. |
 | **Rasterize** | Turns the curve layer into a normal layer (see below). |
 
-When a line is selected, the fields show its settings and changing them changes that line. When no line is selected, they are the settings for the next new line.
+When a shape is selected, the fields show its settings and changing them changes that shape. When no shape is selected, the section is called **Next Shape** and holds the settings for the next new shape (while you draw one, it says **Drawing a Shape**).
 
 Editing also pauses while the animation plays, and starts again when you stop it with Enter.
 
 ### Transforming lines
 
-Transforms work on the selected line, or on all the lines of the frame when no line is selected (the panel says which). Each one is a single undo step. Points stay on whole pixels, and the handles turn and stretch with the line.
+Transforms work on the selected shape, or on all the shapes of the frame when no shape is selected (the panel says which). Each one is a single undo step. Points stay on whole pixels, and the handles turn and stretch with the line.
 
 - **Transform Box** (or **Edit > Transform**, Ctrl+T) puts a box around the lines. It has two modes; click inside the box to switch between them:
 

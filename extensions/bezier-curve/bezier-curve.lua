@@ -22,32 +22,36 @@ local TEXT = {
     rasterizedTip = "The curve layer is now a normal layer. Edit > Undo brings the lines back.",
     layerName = "Curve",
     hint = "Bezier Curve: click to add points, drag points or handles to edit them",
-    hintDrawing = "Bezier Curve: drawing a line (other lines can't be grabbed). Esc, Enter or click its last point: done",
+    hintDrawing = "Bezier Curve: drawing a shape (other shapes can't be grabbed). Esc, Enter or click its last point: done",
     help1 = "Click to add points, drag points or handles to bend.",
     help2 = "Click a line to add a point there. Del: delete the point.",
-    nextLine = "Next Line",
-    selectedLine = "Selected Line",
-    drawingLine = "Drawing a Line (Esc/Enter: done)",
-    color = "Color",
-    width = "Width",
+    nextShape = "Next Shape",
+    selectedShape = "Selected Shape",
+    drawingShape = "Drawing a Shape (Esc/Enter: done)",
+    -- The line and fill settings are grouped under a heading, so their
+    -- labels are indented
+    lineGroup = "Line",
+    fillGroup = "Fill",
+    color = "   Color",
+    width = "   Width",
     pixelPerfect = "Pixel-perfect (width 1)",
     antialias = "Antialias (smooth edges)",
     antialiasIndexed = "Antialias (RGB and Grayscale only)",
     closed = "Connect the ends",
     stroke = "Draw the line",
     fill = "Fill the inside",
-    fillColor = "Fill Color",
+    fillColor = "   Color",
     oneSide = "Move one handle only",
     guides = "Show guides",
-    newLine = "New Line",
-    deleteLine = "Delete Line",
+    newShape = "New Shape",
+    deleteShape = "Delete Shape",
     deletePoint = "Delete Point",
     roundSharp = "Round/Sharp",
     undo = "Undo",
     redo = "Redo",
     stop = "Stop Editing",
-    transformAll = "Transform (all lines)",
-    transformSelected = "Transform (selected line)",
+    transformAll = "Transform (all shapes)",
+    transformSelected = "Transform (selected shape)",
     transformBox = "Transform Box",
     endTransform = "End Transform",
     numeric = "Numeric...",
@@ -87,32 +91,34 @@ local TEXT = {
     rasterizedTip = "曲線レイヤーを普通のレイヤーにしました。編集 > 元に戻す で線のデータも戻せます。",
     layerName = "曲線",
     hint = "ベジェ曲線: クリックで点を追加、点やハンドルをドラッグで編集",
-    hintDrawing = "ベジェ曲線: 線を描いています(ほかの線はつかめません)。Esc・Enter・最後の点をクリックで終了",
+    hintDrawing = "ベジェ曲線: 図形を描いています(ほかの図形はつかめません)。Esc・Enter・最後の点をクリックで終了",
     help1 = "クリックで点を追加、点やハンドルをドラッグで曲げる",
     help2 = "線をクリックでそこに点を追加 / Del: 点を削除",
-    nextLine = "次に描く線",
-    selectedLine = "選択中の線",
-    drawingLine = "線を描画中(Esc / Enter で終了)",
-    color = "色",
-    width = "太さ",
+    nextShape = "次に描く図形",
+    selectedShape = "選択中の図形",
+    drawingShape = "図形を描画中(Esc / Enter で終了)",
+    lineGroup = "線",
+    fillGroup = "塗り",
+    color = "　色",
+    width = "　太さ",
     pixelPerfect = "ピクセルパーフェクト(太さ1のとき)",
     antialias = "アンチエイリアス(縁をなめらかに)",
     antialiasIndexed = "アンチエイリアス(RGB・グレースケールのみ)",
     closed = "始点と終点をつなぐ",
     stroke = "線を描く",
     fill = "内側を塗りつぶす",
-    fillColor = "塗りの色",
+    fillColor = "　色",
     oneSide = "ハンドルを片側だけ動かす",
     guides = "ガイドを表示",
-    newLine = "新しい線",
-    deleteLine = "線を削除",
+    newShape = "新しい図形",
+    deleteShape = "図形を削除",
     deletePoint = "点を削除",
     roundSharp = "丸/角",
     undo = "元に戻す",
     redo = "やり直す",
     stop = "編集をやめる",
-    transformAll = "変形(すべての線)",
-    transformSelected = "変形(選択中の線)",
+    transformAll = "変形(すべての図形)",
+    transformSelected = "変形(選択中の図形)",
     transformBox = "変形ボックス",
     endTransform = "変形を終える",
     numeric = "数値で変形...",
@@ -1098,10 +1104,10 @@ local function syncFields()
     dlg:modify{ id = "stroke", selected = p.stroke ~= false }
     dlg:modify{ id = "fill", selected = p.fill }
     dlg:modify{ id = "fillColor", color = tableToColor(s.sprite, p.fillColor) }
-    dlg:modify{ id = "styleSep", text = s.drawing and T.drawingLine or T.selectedLine }
+    dlg:modify{ id = "styleSep", text = s.drawing and T.drawingShape or T.selectedShape }
   else
     dlg:modify{ id = "closed", selected = false }
-    dlg:modify{ id = "styleSep", text = s.drawing and T.drawingLine or T.nextLine }
+    dlg:modify{ id = "styleSep", text = s.drawing and T.drawingShape or T.nextShape }
   end
   -- Transforms work on the selected line, or on all lines when none is selected
   dlg:modify{ id = "xfSep", text = p and T.transformSelected or T.transformAll }
@@ -2057,7 +2063,21 @@ openPanel = function()
   dlg:label{ text = T.help1 }
      :newrow()
      :label{ text = T.help2 }
-     :separator{ id = "styleSep", text = T.nextLine }
+     -- The shape: settings for the whole shape, then its line and its fill
+     :separator{ id = "styleSep", text = T.nextShape }
+     :check{ id = "closed", label = "", text = T.closed, selected = false,
+             onclick = function()
+               changeStyle("closed", function(p) p.closed = dlg.data.closed end)
+             end }
+     :check{ id = "antialias", label = "", text = T.antialias, selected = prefs.antialias == true,
+             onclick = function()
+               changeStyle("antialias", function(p) p.antialias = dlg.data.antialias end)
+               updateButtons()
+             end }
+     :check{ id = "stroke", label = T.lineGroup, text = T.stroke, selected = true,
+             onclick = function()
+               changeStyle("stroke", function(p) p.stroke = dlg.data.stroke end)
+             end }
      :color{ id = "color", label = T.color, color = app.fgColor,
              onchange = function()
                changeStyle("color", function(p) p.color = colorToTable(dlg.data.color) end)
@@ -2066,24 +2086,11 @@ openPanel = function()
               onchange = function()
                 changeStyle("width", function(p) p.width = dlg.data.width end)
               end }
-     :check{ id = "stroke", label = "", text = T.stroke, selected = true,
-             onclick = function()
-               changeStyle("stroke", function(p) p.stroke = dlg.data.stroke end)
-             end }
-     :check{ id = "pixelPerfect", text = T.pixelPerfect, selected = prefs.pixelPerfect ~= false,
+     :check{ id = "pixelPerfect", label = "", text = T.pixelPerfect, selected = prefs.pixelPerfect ~= false,
              onclick = function()
                changeStyle("pixelPerfect", function(p) p.pixelPerfect = dlg.data.pixelPerfect end)
              end }
-     :check{ id = "antialias", label = "", text = T.antialias, selected = prefs.antialias == true,
-             onclick = function()
-               changeStyle("antialias", function(p) p.antialias = dlg.data.antialias end)
-               updateButtons()
-             end }
-     :check{ id = "closed", label = "", text = T.closed, selected = false,
-             onclick = function()
-               changeStyle("closed", function(p) p.closed = dlg.data.closed end)
-             end }
-     :check{ id = "fill", text = T.fill, selected = false,
+     :check{ id = "fill", label = T.fillGroup, text = T.fill, selected = false,
              onclick = function()
                changeStyle("fill", function(p) p.fill = dlg.data.fill end)
              end }
@@ -2091,11 +2098,13 @@ openPanel = function()
              onchange = function()
                changeStyle("fillColor", function(p) p.fillColor = colorToTable(dlg.data.fillColor) end)
              end }
+     -- Editing options
+     :separator{}
      :check{ id = "oneSide", label = "", text = T.oneSide, selected = false }
      :check{ id = "guides", text = T.guides, selected = true,
              onclick = whenEditing(function() refresh() end) }
      :separator{}
-     :button{ id = "newLine", text = T.newLine,
+     :button{ id = "newLine", text = T.newShape,
               onclick = whenEditing(function(s)
                 -- Until drawing ends, clicks only draw the new line (other lines can't be grabbed)
                 s.xf = nil
@@ -2105,7 +2114,7 @@ openPanel = function()
                 refresh()
                 askTimer:start()
               end) }
-     :button{ id = "deleteLine", text = T.deleteLine,
+     :button{ id = "deleteLine", text = T.deleteShape,
               onclick = whenEditing(function(s)
                 if not s.paths[s.active] then return end
                 local pi = s.active
