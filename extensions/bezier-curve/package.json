@@ -1,0 +1,15 @@
+{
+  "name": "bezier-curve",
+  "displayName": "Bezier Curve",
+  "description": "Draw lines with Bezier curves on curve layers, and edit them right on the canvas at any time.",
+  "version": "1.0.0",
+  "author": { "name": "MLSNKKSKK" },
+  "publisher": "asepritescript",
+  "license": "MIT",
+  "categories": [ "Scripts" ],
+  "contributes": {
+    "scripts": [
+      { "path": "./bezier-curve.lua" }
+    ]
+  }
+}
