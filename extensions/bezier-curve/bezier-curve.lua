@@ -28,8 +28,8 @@ local TEXT = {
     nextShape = "Next Shape",
     selectedShape = "Selected Shape",
     drawingShape = "Drawing a Shape (Esc/Enter: done)",
-    -- The line and fill settings are grouped under a heading, so their
-    -- labels are indented
+    -- The line and fill settings are grouped under their own headings, so
+    -- their labels are indented
     lineGroup = "Line",
     fillGroup = "Fill",
     color = "   Color",
@@ -2074,7 +2074,8 @@ openPanel = function()
                changeStyle("antialias", function(p) p.antialias = dlg.data.antialias end)
                updateButtons()
              end }
-     :check{ id = "stroke", label = T.lineGroup, text = T.stroke, selected = true,
+     :separator{ id = "lineSep", text = T.lineGroup }
+     :check{ id = "stroke", label = "", text = T.stroke, selected = true,
              onclick = function()
                changeStyle("stroke", function(p) p.stroke = dlg.data.stroke end)
              end }
@@ -2090,7 +2091,8 @@ openPanel = function()
              onclick = function()
                changeStyle("pixelPerfect", function(p) p.pixelPerfect = dlg.data.pixelPerfect end)
              end }
-     :check{ id = "fill", label = T.fillGroup, text = T.fill, selected = false,
+     :separator{ id = "fillSep", text = T.fillGroup }
+     :check{ id = "fill", label = "", text = T.fill, selected = false,
              onclick = function()
                changeStyle("fill", function(p) p.fill = dlg.data.fill end)
              end }
