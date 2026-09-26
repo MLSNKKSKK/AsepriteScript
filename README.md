@@ -209,10 +209,13 @@ While you edit, the points and handles are shown on the curve layer in bright gr
 
 Grayscale sprites can't show green, and neither can Indexed sprites whose palette has no green, so there the guides are black and white instead: points have a black outline and a white center (the selected point the other way around), handles are dotted in black and white, and each handle end is whichever of black or white stands out from the picture. Adding a bright green to an Indexed palette makes the guides green. They disappear when you leave the layer. Zoom in to work comfortably.
 
-The panel's first section, **Selected Shape**, holds the settings of the selected shape. It has two groups: **Line** for the line around the shape, and **Fill** for its inside.
+At the top of the panel are the buttons for new shapes, deleting, copying and pasting. Below them, the **Selected Shape** section holds the settings of the selected shape. It has two groups: **Line** for the line around the shape, and **Fill** for its inside.
 
 | Panel | Description |
 | --- | --- |
+| **New Shape** | Finishes the current shape, so the next click starts a new one. |
+| **Delete Shape** | Deletes the selected shape. |
+| **Copy** / **Paste** | **Copy** copies the selected shape, or all the shapes of the frame when none is selected. **Paste** adds them at the same place to the frame you're editing, which can be another frame, layer or sprite (handy for animation). When they would land exactly on the same shapes (for example when you paste in the frame you copied from), they go 4 pixels away, towards the inside of the canvas, so Copy and Paste also duplicate shapes. A single pasted shape gets selected. To copy a whole frame, you can also copy its cel in the timeline (for example by dragging it with Ctrl held down): the curves go along and stay editable. |
 | **Connect the ends** | Joins the last point of the selected shape back to the first. |
 | **Antialias (smooth edges)** | Smooths the edges of the line and the fill with partly transparent pixels. Where shapes overlap, they blend with each other. RGB and Grayscale only: Indexed sprites can't have partly transparent pixels, so there it's turned off. |
 | **Line**: **Draw the line** | Turn it off to draw only the fill, without a line around it. |
@@ -223,9 +226,7 @@ The panel's first section, **Selected Shape**, holds the settings of the selecte
 | **Fill**: **Color** | The fill color. |
 | **Move one handle only** | Dragging a handle doesn't turn the one on the other side, so you can make sharp corners. |
 | **Show guides** | Shows or hides the points and handles, to check how the shapes really look. |
-| **New Shape** | Finishes the current shape, so the next click starts a new one. |
-| **Copy** / **Paste** | **Copy** copies the selected shape, or all the shapes of the frame when none is selected. **Paste** adds them at the same place to the frame you're editing, which can be another frame, layer or sprite (handy for animation). When they would land exactly on the same shapes (for example when you paste in the frame you copied from), they go 4 pixels away, towards the inside of the canvas, so Copy and Paste also duplicate shapes. A single pasted shape gets selected. To copy a whole frame, you can also copy its cel in the timeline (for example by dragging it with Ctrl held down): the curves go along and stay editable. |
-| **Delete Shape** / **Delete Point** | Deletes the selected shape / point. |
+| **Delete Point** | Deletes the selected point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
 | **Transform Box**, **Numeric...**, **Flip**, **Rotate**, **Keep proportions** | Transform the shapes (see below). |
 | **Undo** / **Redo** | Undo / redo your changes to the shapes. |

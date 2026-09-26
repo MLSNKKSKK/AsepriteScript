@@ -2219,7 +2219,35 @@ openPanel = function()
     panel = nil
     stopEditing()
   end }
-  dlg:label{ text = T.help1 }
+  -- Shapes: new, delete, copy and paste
+  dlg:button{ id = "newLine", text = T.newShape,
+              onclick = whenEditing(function(s)
+                -- Until drawing ends, clicks only draw the new line (other lines can't be grabbed)
+                s.xf = nil
+                s.drawing = true
+                select(nil, nil)
+                syncFields()
+                refresh()
+                askTimer:start()
+              end) }
+     :button{ id = "deleteLine", text = T.deleteShape,
+              onclick = whenEditing(function(s)
+                if not s.paths[s.active] then return end
+                local pi = s.active
+                edit(function()
+                  table.remove(s.paths, pi)
+                  s.drawing = false
+                  s.xf = nil
+                  select(nil, nil)
+                end)
+                syncFields()
+                askTimer:start()
+              end) }
+     :newrow()
+     :button{ id = "copy", text = T.copy, onclick = whenEditing(copyShapes) }
+     :button{ id = "paste", text = T.paste, onclick = whenEditing(pasteShapes) }
+     :newrow()
+     :label{ text = T.help1 }
      :newrow()
      :label{ text = T.help2 }
      -- The shape: settings for the whole shape, then its line and its fill
@@ -2265,33 +2293,6 @@ openPanel = function()
      :check{ id = "guides", text = T.guides, selected = true,
              onclick = whenEditing(function() refresh() end) }
      :separator{}
-     :button{ id = "newLine", text = T.newShape,
-              onclick = whenEditing(function(s)
-                -- Until drawing ends, clicks only draw the new line (other lines can't be grabbed)
-                s.xf = nil
-                s.drawing = true
-                select(nil, nil)
-                syncFields()
-                refresh()
-                askTimer:start()
-              end) }
-     :button{ id = "deleteLine", text = T.deleteShape,
-              onclick = whenEditing(function(s)
-                if not s.paths[s.active] then return end
-                local pi = s.active
-                edit(function()
-                  table.remove(s.paths, pi)
-                  s.drawing = false
-                  s.xf = nil
-                  select(nil, nil)
-                end)
-                syncFields()
-                askTimer:start()
-              end) }
-     :newrow()
-     :button{ id = "copy", text = T.copy, onclick = whenEditing(copyShapes) }
-     :button{ id = "paste", text = T.paste, onclick = whenEditing(pasteShapes) }
-     :newrow()
      :button{ id = "deletePoint", text = T.deletePoint, onclick = whenEditing(deleteSelectedPoint) }
      :button{ id = "roundSharp", text = T.roundSharp,
               onclick = whenEditing(function(s)
