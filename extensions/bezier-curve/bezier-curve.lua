@@ -19,10 +19,12 @@ local TEXT = {
     editCmd = "Edit Curves",
     layerName = "Curve",
     hint = "Bezier Curve: click to add points, drag points or handles to edit them",
+    hintNew = "Bezier Curve: drawing a new line (other lines can't be selected). Esc: done",
     help1 = "Click to add points, drag points or handles to bend.",
     help2 = "Click a line to add a point there. Del: delete the point.",
     nextLine = "Next Line",
     selectedLine = "Selected Line",
+    drawingLine = "New Line (Esc: done)",
     color = "Color",
     width = "Width",
     pixelPerfect = "Pixel-perfect (width 1)",
@@ -55,10 +57,12 @@ local TEXT = {
     editCmd = "曲線を編集",
     layerName = "曲線",
     hint = "ベジェ曲線: クリックで点を追加、点やハンドルをドラッグで編集",
+    hintNew = "ベジェ曲線: 新しい線を描いています(ほかの線は選べません)。Esc で終了",
     help1 = "クリックで点を追加、点やハンドルをドラッグで曲げる",
     help2 = "線をクリックでそこに点を追加 / Del: 点を削除",
     nextLine = "次に描く線",
     selectedLine = "選択中の線",
+    drawingLine = "新しい線(Esc で終了)",
     color = "色",
     width = "太さ",
     pixelPerfect = "ピクセルパーフェクト(太さ1のとき)",
@@ -586,10 +590,10 @@ local function syncFields()
     dlg:modify{ id = "width", value = p.width }
     dlg:modify{ id = "pixelPerfect", selected = p.pixelPerfect }
     dlg:modify{ id = "closed", selected = p.closed }
-    dlg:modify{ id = "styleSep", text = T.selectedLine }
+    dlg:modify{ id = "styleSep", text = s.newLine and T.drawingLine or T.selectedLine }
   else
     dlg:modify{ id = "closed", selected = false }
-    dlg:modify{ id = "styleSep", text = T.nextLine }
+    dlg:modify{ id = "styleSep", text = s.newLine and T.drawingLine or T.nextLine }
   end
   s.syncing = false
 end
@@ -827,10 +831,12 @@ local function nearestOnSegment(a, b, x, y)
   return bestT, bestD
 end
 
--- Finds what's at the pixel (x, y): a handle, a point, or a line
+-- Finds what's at the pixel (x, y): a handle, a point, or a line.
+-- While a new line is being drawn, only that line can be grabbed.
 local function hitTest(x, y)
   local s = S
   local tol = tolerance()
+  local function grabbable(pi) return not s.newLine or pi == s.active end
   local best, bestD = nil, math.huge
   local function consider(d, hit)
     if d <= tol and d < bestD then best, bestD = hit, d end
@@ -854,8 +860,10 @@ local function hitTest(x, y)
   -- Points (the selected line wins a tie)
   for pi, q in ipairs(s.paths) do
     local bias = pi == s.active and 0 or 0.02
-    for i, n in ipairs(q.nodes) do
-      consider(dist(x, y, n.x, n.y) + bias, { kind = "anchor", path = pi, node = i })
+    if grabbable(pi) then
+      for i, n in ipairs(q.nodes) do
+        consider(dist(x, y, n.x, n.y) + bias, { kind = "anchor", path = pi, node = i })
+      end
     end
   end
   if best then return best end
@@ -863,10 +871,12 @@ local function hitTest(x, y)
   -- Lines: a click on one of their pixels, or close to the curve
   for pi, q in ipairs(s.paths) do
     local onPixel = false
-    plotPath(s.sprite, q, function(px, py)
-      if px == x and py == y then onPixel = true end
-    end)
-    for _, sg in ipairs(segments(q)) do
+    if grabbable(pi) then
+      plotPath(s.sprite, q, function(px, py)
+        if px == x and py == y then onPixel = true end
+      end)
+    end
+    for _, sg in ipairs(grabbable(pi) and segments(q) or {}) do
       local t, d = nearestOnSegment(sg[1], sg[2], x, y)
       if pi ~= s.active then d = d + 0.02 end
       if (onPixel or d <= tol) and d < bestD then
@@ -991,8 +1001,10 @@ local function onCancel()
     local before = s.press.before
     s.press = nil
     restore(before)
-  elseif s.active then
+  elseif s.active or s.newLine then
+    s.newLine = false
     select(nil, nil)
+    syncFields()
     refresh()
   end
   askTimer:start()
@@ -1004,7 +1016,7 @@ local function ask()
   local p = s.paths[s.active]
   local n = p and s.selNode and p.nodes[s.selNode]
   -- `point` outlines the selected point
-  s.editor:askPoint{ title = T.hint, point = n and Point(n.x, n.y) or nil,
+  s.editor:askPoint{ title = s.newLine and T.hintNew or T.hint, point = n and Point(n.x, n.y) or nil,
                      onchange = onChange, onclick = onClick, oncancel = onCancel }
 end
 
@@ -1061,10 +1073,10 @@ local function startSession(force)
     active = nil, selNode = nil, press = nil,
     undoStack = {}, redoStack = {}, lastMerge = nil,
     guide = {
-      point = guidePixel(sprite, 255, 0, 200),      -- points of the selected line
-      selected = guidePixel(sprite, 255, 230, 0),   -- the selected point
-      handle = guidePixel(sprite, 0, 200, 255),     -- handles
-      other = guidePixel(sprite, 150, 70, 220),     -- points of the other lines
+      point = guidePixel(sprite, 0, 255, 0),        -- points of the selected line
+      selected = guidePixel(sprite, 200, 255, 200), -- the selected point
+      handle = guidePixel(sprite, 0, 255, 0),       -- handles
+      other = guidePixel(sprite, 0, 170, 0),        -- points of the other lines
     },
   }
   S = s
@@ -1231,8 +1243,11 @@ openPanel = function()
              onclick = whenEditing(function() refresh() end) }
      :separator{}
      :button{ id = "newLine", text = T.newLine,
-              onclick = whenEditing(function()
+              onclick = whenEditing(function(s)
+                -- Until Esc, clicks only draw the new line (other lines can't be grabbed)
+                s.newLine = true
                 select(nil, nil)
+                syncFields()
                 refresh()
                 askTimer:start()
               end) }
@@ -1242,8 +1257,10 @@ openPanel = function()
                 local pi = s.active
                 edit(function()
                   table.remove(s.paths, pi)
+                  s.newLine = false
                   select(nil, nil)
                 end)
+                syncFields()
                 askTimer:start()
               end) }
      :newrow()

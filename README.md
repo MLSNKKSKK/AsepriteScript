@@ -201,7 +201,7 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 
 There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
 
-While you edit, the points and handles are shown on the curve layer as colored pixels: magenta for the points of the selected line, yellow for the selected point, cyan for the handles, and purple for the points of the other lines. They disappear when you leave the layer. Zoom in to work comfortably.
+While you edit, the points and handles are shown on the curve layer as bright green pixels: the points and handles of the selected line in bright green, the selected point in pale green, and the points of the other lines in darker green. They disappear when you leave the layer. Zoom in to work comfortably.
 
 | Panel | Description |
 | --- | --- |
@@ -211,7 +211,7 @@ While you edit, the points and handles are shown on the curve layer as colored p
 | **Connect the ends** | Joins the last point of the selected line back to the first. |
 | **Move one handle only** | Dragging a handle doesn't turn the one on the other side, so you can make sharp corners. |
 | **Show guides** | Shows or hides the points and handles, to check how the line really looks. |
-| **New Line** | Deselects the line, so the next click starts a new one. |
+| **New Line** | Starts a new line. Until you press **Esc**, clicks only draw the new line: other lines can't be grabbed, so you can start on or cross over them. |
 | **Delete Line** / **Delete Point** | Deletes the selected line / point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
 | **Undo** / **Redo** | Undo / redo your changes to the lines. |
