@@ -57,6 +57,10 @@ local TEXT = {
     deleteShape = "Delete Shape",
     copy = "Copy",
     paste = "Paste",
+    toFront = "To Front",
+    forward = "Forward",
+    backward = "Backward",
+    toBack = "To Back",
     copiedOne = "Copied 1 shape. Paste it in any frame, layer or sprite.",
     copiedMany = "Copied %d shapes. Paste them in any frame, layer or sprite.",
     deletePoint = "Delete Point",
@@ -138,6 +142,10 @@ local TEXT = {
     deleteShape = "図形を削除",
     copy = "コピー",
     paste = "貼り付け",
+    toFront = "最前面へ",
+    forward = "前面へ",
+    backward = "背面へ",
+    toBack = "最背面へ",
     copiedOne = "図形を1個コピーしました。ほかのフレーム・レイヤー・スプライトにも貼り付けられます。",
     copiedMany = "図形を%d個コピーしました。ほかのフレーム・レイヤー・スプライトにも貼り付けられます。",
     deletePoint = "点を削除",
@@ -1218,6 +1226,12 @@ local function updateButtons()
   dlg:modify{ id = "pixelPerfect", enabled = indexed or not dlg.data.antialias }
   dlg:modify{ id = "closed", enabled = p ~= nil }
   dlg:modify{ id = "copy", enabled = #s.paths > 0 }
+  -- Stacking order: shapes later in the list are drawn on top
+  local top, bottom = p ~= nil and s.active == #s.paths, p ~= nil and s.active == 1
+  dlg:modify{ id = "toFront", enabled = p ~= nil and not top }
+  dlg:modify{ id = "forward", enabled = p ~= nil and not top }
+  dlg:modify{ id = "backward", enabled = p ~= nil and not bottom }
+  dlg:modify{ id = "toBack", enabled = p ~= nil and not bottom }
   dlg:modify{ id = "paste", enabled = clipboard ~= nil }
   dlg:modify{ id = "deleteLine", enabled = p ~= nil }
   dlg:modify{ id = "deletePoint", enabled = hasPoint }
@@ -2296,6 +2310,22 @@ local function pasteShapes(s)
   askTimer:start()
 end
 
+-- Moves the selected shape in the stacking order: "front", "forward",
+-- "backward" or "back"
+local function restack(to)
+  return function(s)
+    local pi, n = s.active, #s.paths
+    if not s.paths[pi] then return end
+    local dest = ({ front = n, forward = math.min(n, pi + 1), backward = math.max(1, pi - 1), back = 1 })[to]
+    if dest == pi then return end
+    edit(function()
+      table.insert(s.paths, dest, table.remove(s.paths, pi))
+      s.active = dest   -- the same shape stays selected
+    end)
+    askTimer:start()
+  end
+end
+
 -- Place Shape: asks for the kind of shape; then the next drag on the canvas
 -- places it
 local function placeShapeDialog(s)
@@ -2446,6 +2476,11 @@ openPanel = function()
      :newrow()
      :button{ id = "copy", text = T.copy, onclick = whenEditing(copyShapes) }
      :button{ id = "paste", text = T.paste, onclick = whenEditing(pasteShapes) }
+     :newrow()
+     :button{ id = "toFront", text = T.toFront, onclick = whenEditing(restack("front")) }
+     :button{ id = "forward", text = T.forward, onclick = whenEditing(restack("forward")) }
+     :button{ id = "backward", text = T.backward, onclick = whenEditing(restack("backward")) }
+     :button{ id = "toBack", text = T.toBack, onclick = whenEditing(restack("back")) }
      -- The shape: its antialiasing, then its line and its fill
      :separator{ id = "styleSep", text = T.nextShape }
      :check{ id = "antialias", label = "", text = T.antialias, selected = prefs.antialias == true,
