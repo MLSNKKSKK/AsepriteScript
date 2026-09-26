@@ -196,7 +196,7 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 | Drag a point | Moves the point. |
 | Drag a handle | Changes how the line bends. The handle on the other side turns with it, unless **Move one handle only** is checked. |
 | Click a line | Selects its shape. Clicking a line of the selected shape adds a point there without changing its form. |
-| Click inside a filled shape | Selects the shape (the one on top where fills overlap). To start a new shape on top of a fill, press **New Shape** first. |
+| Click inside a filled shape | Selects the shape (the one on top where fills overlap). To start a new shape on top of a fill, press **Draw New** first. |
 | Drag a line, or inside a fill | Moves the whole shape. |
 | Click a point | Selects it (it gets a white outline). |
 | **Delete** / **Backspace** | Deletes the selected point, and selects the one before it (so pressing it again goes on with the points). When a shape is selected without a point (for example after clicking its line or fill, or closing it), deletes the whole shape. |
@@ -215,7 +215,7 @@ At the top of the panel, below a short help text, are the buttons for new shapes
 
 | Panel | Description |
 | --- | --- |
-| **New Shape** | Finishes the current shape, so the next click starts a new one. |
+| **Draw New** | Finishes the current shape, so the next click starts a new one. |
 | **Delete Shape** | Deletes the selected shape. |
 | **Copy** / **Paste** | **Copy** copies the selected shape, or all the shapes of the frame when none is selected. **Paste** adds them at the same place to the frame you're editing, which can be another frame, layer or sprite (handy for animation). When they would land exactly on the same shapes (for example when you paste in the frame you copied from), they go 4 pixels away, towards the inside of the canvas, so Copy and Paste also duplicate shapes. A single pasted shape gets selected. To copy a whole frame, you can also copy its cel in the timeline (for example by dragging it with Ctrl held down): the curves go along and stay editable. |
 | **Antialias (smooth edges)** | Smooths the edges of the line and the fill with partly transparent pixels. Where shapes overlap, they blend with each other. RGB and Grayscale only: Indexed sprites can't have partly transparent pixels, so there it's turned off. |
