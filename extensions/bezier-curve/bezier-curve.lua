@@ -49,7 +49,7 @@ local TEXT = {
     roundSharp = "Round/Sharp",
     undo = "Undo",
     redo = "Redo",
-    stop = "Stop Editing",
+    stop = "Close",
     transformAll = "Transform (all shapes)",
     transformSelected = "Transform (selected shape)",
     transformBox = "Transform Box",
@@ -116,7 +116,7 @@ local TEXT = {
     roundSharp = "丸/角",
     undo = "元に戻す",
     redo = "やり直す",
-    stop = "編集をやめる",
+    stop = "閉じる",
     transformAll = "変形(すべての図形)",
     transformSelected = "変形(選択中の図形)",
     transformBox = "変形ボックス",
@@ -1941,7 +1941,8 @@ local function finishSession(canUndo)
   end
 end
 
--- "Stop Editing": apply, and leave the layer alone until it's selected again
+-- "Close" (or closing the panel): apply, and leave the layer alone until
+-- it's selected again
 local function stopEditing()
   local s = S
   if not s or s.finished then return end
