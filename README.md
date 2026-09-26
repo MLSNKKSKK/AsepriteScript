@@ -209,7 +209,7 @@ While you edit, the points and handles are shown on the curve layer in bright gr
 
 Grayscale sprites can't show green, and neither can Indexed sprites whose palette has no green, so there the guides are black and white instead: points have a black outline and a white center (the selected point the other way around), handles are dotted in black and white, and each handle end is whichever of black or white stands out from the picture. Adding a bright green to an Indexed palette makes the guides green. They disappear when you leave the layer. Zoom in to work comfortably.
 
-At the top of the panel are the buttons for new shapes, deleting, copying and pasting. Below them, the **Selected Shape** section holds the settings of the selected shape. It has two groups: **Line** for the line around the shape, and **Fill** for its inside.
+At the top of the panel, below a short help text, are the buttons for new shapes, deleting, copying and pasting. Below them, the **Selected Shape** section holds the settings of the selected shape. It has two groups: **Line** for the line around the shape, and **Fill** for its inside.
 
 | Panel | Description |
 | --- | --- |

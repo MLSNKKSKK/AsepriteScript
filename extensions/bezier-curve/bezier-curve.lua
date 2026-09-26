@@ -2219,8 +2219,11 @@ openPanel = function()
     panel = nil
     stopEditing()
   end }
-  -- Shapes: new, delete, copy and paste
-  dlg:button{ id = "newLine", text = T.newShape,
+  dlg:label{ text = T.help1 }
+     :newrow()
+     :label{ text = T.help2 }
+     -- Shapes: new, delete, copy and paste
+     :button{ id = "newLine", text = T.newShape,
               onclick = whenEditing(function(s)
                 -- Until drawing ends, clicks only draw the new line (other lines can't be grabbed)
                 s.xf = nil
@@ -2246,10 +2249,6 @@ openPanel = function()
      :newrow()
      :button{ id = "copy", text = T.copy, onclick = whenEditing(copyShapes) }
      :button{ id = "paste", text = T.paste, onclick = whenEditing(pasteShapes) }
-     :newrow()
-     :label{ text = T.help1 }
-     :newrow()
-     :label{ text = T.help2 }
      -- The shape: settings for the whole shape, then its line and its fill
      :separator{ id = "styleSep", text = T.nextShape }
      :check{ id = "closed", label = "", text = T.closed, selected = false,
