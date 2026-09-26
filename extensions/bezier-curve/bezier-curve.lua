@@ -29,6 +29,8 @@ local TEXT = {
     width = "Width",
     pixelPerfect = "Pixel-perfect (width 1)",
     closed = "Connect the ends",
+    fill = "Fill the inside",
+    fillColor = "Fill Color",
     oneSide = "Move one handle only",
     guides = "Show guides",
     newLine = "New Line",
@@ -67,6 +69,8 @@ local TEXT = {
     width = "太さ",
     pixelPerfect = "ピクセルパーフェクト(太さ1のとき)",
     closed = "始点と終点をつなぐ",
+    fill = "内側を塗りつぶす",
+    fillColor = "塗りの色",
     oneSide = "ハンドルを片側だけ動かす",
     guides = "ガイドを表示",
     newLine = "新しい線",
@@ -125,6 +129,8 @@ end
 -- the "in" handle (ix, iy) bends the curve coming into the point, and
 -- the "out" handle (ox, oy) bends the curve leaving it.
 -- A smooth node keeps both handles on a straight line.
+-- A line can also fill its inside (fill, fillColor). An open line is filled
+-- as if its ends were joined by a straight line.
 
 local function colorToTable(c)
   return { r = c.red, g = c.green, b = c.blue, a = c.alpha, index = c.index }
@@ -140,9 +146,10 @@ local function serialize(paths)
   local function h(v) return round(v * 100) / 100 end
   local lines = {}
   for _, p in ipairs(paths) do
-    local c = p.color
-    lines[#lines + 1] = string.format("path %d %d %d %d %d %d %d %d",
-      c.r, c.g, c.b, c.a, c.index, p.width, p.closed and 1 or 0, p.pixelPerfect and 1 or 0)
+    local c, f = p.color, p.fillColor or p.color
+    lines[#lines + 1] = string.format("path %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
+      c.r, c.g, c.b, c.a, c.index, p.width, p.closed and 1 or 0, p.pixelPerfect and 1 or 0,
+      p.fill and 1 or 0, f.r, f.g, f.b, f.a, f.index)
     for _, n in ipairs(p.nodes) do
       lines[#lines + 1] = string.format("node %d %d %.2f %.2f %.2f %.2f %d",
         n.x, n.y, h(n.ix), h(n.iy), h(n.ox), h(n.oy), n.smooth and 1 or 0)
@@ -158,11 +165,17 @@ local function parse(text)
     for w in line:gmatch("%S+") do v[#v + 1] = w end
     local function num(i) return tonumber(v[i]) or 0 end
     if v[1] == "path" then
+      local color = { r = floor(num(2)), g = floor(num(3)), b = floor(num(4)), a = floor(num(5)), index = floor(num(6)) }
       cur = {
-        color = { r = floor(num(2)), g = floor(num(3)), b = floor(num(4)), a = floor(num(5)), index = floor(num(6)) },
+        color = color,
         width = math.max(1, floor(num(7))),
         closed = num(8) == 1,
         pixelPerfect = num(9) == 1,
+        -- Older data has no fill fields
+        fill = num(10) == 1,
+        fillColor = v[15] and { r = floor(num(11)), g = floor(num(12)), b = floor(num(13)),
+                                a = floor(num(14)), index = floor(num(15)) }
+                    or { r = color.r, g = color.g, b = color.b, a = color.a, index = color.index },
         nodes = {},
       }
       paths[#paths + 1] = cur
@@ -240,8 +253,10 @@ local function tracePath(p)
   return xs, ys
 end
 
--- Removes the extra pixel from L-shaped corners so 1px lines look clean
-local function pixelPerfect(xs, ys)
+-- Removes the extra pixel from L-shaped corners so 1px lines look clean.
+-- Pixels in `keep` (the line's own points, e.g. the corners of a square)
+-- are never removed.
+local function pixelPerfect(xs, ys, keep)
   local n = #xs
   if n < 3 then return xs, ys end
   local rx, ry = { xs[1] }, { ys[1] }
@@ -250,7 +265,7 @@ local function pixelPerfect(xs, ys)
     local bx, by, cx, cy = xs[i], ys[i], xs[i + 1], ys[i + 1]
     local corner = (ax == bx or ay == by) and (cx == bx or cy == by)
                    and ax ~= cx and ay ~= cy
-    if not corner then rx[#rx + 1], ry[#ry + 1] = bx, by end
+    if not corner or keep[bx .. "," .. by] then rx[#rx + 1], ry[#ry + 1] = bx, by end
   end
   rx[#rx + 1], ry[#ry + 1] = xs[n], ys[n]
   return rx, ry
@@ -278,7 +293,11 @@ end
 -- Calls fn(x, y) once for every pixel of the line that's inside the canvas
 local function plotPath(sprite, p, fn)
   local xs, ys = tracePath(p)
-  if p.width == 1 and p.pixelPerfect then xs, ys = pixelPerfect(xs, ys) end
+  if p.width == 1 and p.pixelPerfect then
+    local keep = {}
+    for _, n in ipairs(p.nodes) do keep[n.x .. "," .. n.y] = true end
+    xs, ys = pixelPerfect(xs, ys, keep)
+  end
   local offs = brushOffsets(p.width)
   local W, H = sprite.width, sprite.height
   local seen = {}
@@ -300,15 +319,72 @@ local function grayOf(c)
   return (c.r * 2126 + c.g * 7152 + c.b * 722) // 10000
 end
 
--- Pixel value to write in the sprite's color mode
-local function outputPixel(sprite, p)
-  local c = p.color
+-- Calls fn(x, y) for every pixel of the canvas whose center is inside the
+-- line (nonzero winding rule). An open line is closed with a straight line.
+local function fillPath(sprite, p, fn)
+  if #p.nodes < 2 then return end
+  -- The outline as a polygon
+  local pts = { { p.nodes[1].x, p.nodes[1].y } }
+  for _, sg in ipairs(segments(p)) do
+    local a, b = sg[1], sg[2]
+    local len = dist(a.x, a.y, a.x + a.ox, a.y + a.oy)
+              + dist(a.x + a.ox, a.y + a.oy, b.x + b.ix, b.y + b.iy)
+              + dist(b.x + b.ix, b.y + b.iy, b.x, b.y)
+    local steps = math.max(1, math.ceil(len * 2))
+    for i = 1, steps do
+      local x, y = bezier(a, b, i / steps)
+      pts[#pts + 1] = { x, y }
+    end
+  end
+  local n = #pts
+  local top, bottom = math.huge, -math.huge
+  for _, q in ipairs(pts) do
+    if q[2] < top then top = q[2] end
+    if q[2] > bottom then bottom = q[2] end
+  end
+  local W = sprite.width
+  for y = math.max(0, math.ceil(top)), math.min(sprite.height - 1, floor(bottom)) do
+    -- Where the edges cross this row, and in which direction
+    local xs = {}
+    for i = 1, n do
+      local a, b = pts[i], pts[i % n + 1]
+      if (a[2] <= y and b[2] > y) or (b[2] <= y and a[2] > y) then
+        local t = (y - a[2]) / (b[2] - a[2])
+        xs[#xs + 1] = { a[1] + t * (b[1] - a[1]), b[2] > a[2] and 1 or -1 }
+      end
+    end
+    table.sort(xs, function(u, v) return u[1] < v[1] end)
+    local winding = 0
+    for i = 1, #xs - 1 do
+      winding = winding + xs[i][2]
+      if winding ~= 0 then
+        for x = math.max(0, math.ceil(xs[i][1])), math.min(W - 1, floor(xs[i + 1][1])) do
+          fn(x, y)
+        end
+      end
+    end
+  end
+end
+
+-- Pixel value of a color in the sprite's color mode
+local function colorPixel(sprite, c)
   if sprite.colorMode == ColorMode.INDEXED then
     return c.index
   elseif sprite.colorMode == ColorMode.GRAY then
     return pc.graya(grayOf(c), c.a)
   end
   return pc.rgba(c.r, c.g, c.b, c.a)
+end
+
+-- Draws a line (its fill first, then the line itself) by calling
+-- put(x, y, pixel value) for each pixel
+local function drawPath(sprite, p, put)
+  if p.fill then
+    local fv = colorPixel(sprite, p.fillColor)
+    fillPath(sprite, p, function(x, y) put(x, y, fv) end)
+  end
+  local v = colorPixel(sprite, p.color)
+  plotPath(sprite, p, function(x, y) put(x, y, v) end)
 end
 
 local function blankImage(sprite, w, h)
@@ -322,8 +398,7 @@ end
 local function renderPaths(sprite, paths)
   local img = blankImage(sprite, sprite.width, sprite.height)
   for _, p in ipairs(paths) do
-    local v = outputPixel(sprite, p)
-    plotPath(sprite, p, function(x, y) img:drawPixel(x, y, v) end)
+    drawPath(sprite, p, function(x, y, v) img:drawPixel(x, y, v) end)
   end
   return img
 end
@@ -612,6 +687,8 @@ local function syncFields()
     dlg:modify{ id = "width", value = p.width }
     dlg:modify{ id = "pixelPerfect", selected = p.pixelPerfect }
     dlg:modify{ id = "closed", selected = p.closed }
+    dlg:modify{ id = "fill", selected = p.fill }
+    dlg:modify{ id = "fillColor", color = tableToColor(s.sprite, p.fillColor) }
     dlg:modify{ id = "styleSep", text = s.drawing and T.drawingLine or T.selectedLine }
   else
     dlg:modify{ id = "closed", selected = false }
@@ -753,8 +830,7 @@ local function redraw()
   end
   local want = {}
   for _, p in ipairs(s.paths) do
-    local v = outputPixel(s.sprite, p)
-    plotPath(s.sprite, p, function(x, y)
+    drawPath(s.sprite, p, function(x, y, v)
       local k = overlayKey(s.ov, x, y)
       if k then want[k] = v end
     end)
@@ -937,13 +1013,13 @@ local function addPoint(x, y)
   s.drawing = true
   local p = s.paths[s.active]
   if not p or p.closed then
-    local color, width, perfect = app.fgColor, 1, true
+    local color, width, perfect, fill, fillColor = app.fgColor, 1, true, false, app.fgColor
     if panel then
       local d = panel.data
-      color, width, perfect = d.color, d.width, d.pixelPerfect
+      color, width, perfect, fill, fillColor = d.color, d.width, d.pixelPerfect, d.fill, d.fillColor
     end
     p = { color = colorToTable(color), width = width, pixelPerfect = perfect,
-          closed = false, nodes = {} }
+          fill = fill, fillColor = colorToTable(fillColor), closed = false, nodes = {} }
     s.paths[#s.paths + 1] = p
     select(#s.paths, nil)
   end
@@ -1288,6 +1364,14 @@ openPanel = function()
      :check{ id = "closed", text = T.closed, selected = false,
              onclick = function()
                changeStyle("closed", function(p) p.closed = dlg.data.closed end)
+             end }
+     :check{ id = "fill", label = "", text = T.fill, selected = false,
+             onclick = function()
+               changeStyle("fill", function(p) p.fill = dlg.data.fill end)
+             end }
+     :color{ id = "fillColor", label = T.fillColor, color = app.fgColor,
+             onchange = function()
+               changeStyle("fillColor", function(p) p.fillColor = colorToTable(dlg.data.fillColor) end)
              end }
      :check{ id = "oneSide", label = "", text = T.oneSide, selected = false }
      :check{ id = "guides", text = T.guides, selected = true,

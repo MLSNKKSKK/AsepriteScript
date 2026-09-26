@@ -176,7 +176,7 @@ An extension that adds **curve layers**. Lines on a curve layer are drawn with B
 - Click and drag on the canvas, like the Pen tool in drawing apps. A small panel holds the settings
 - Several lines per layer, each with its own color and width (1–32 px, round brush)
 - Pixel-perfect option for clean 1px lines
-- Closed shapes (connect the last point to the first)
+- Closed shapes (connect the last point to the first), and filling the inside with a color
 - Each frame has its own lines
 - Works with RGB, Grayscale and Indexed sprites
 
@@ -210,8 +210,10 @@ While you edit, the points and handles are shown on the curve layer in bright gr
 | --- | --- |
 | **Color** | The line color. Starts as the current foreground color. |
 | **Width** | The line width in pixels (1–32). |
-| **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines. |
+| **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines (the line's own points are always kept, so the corners of a square stay sharp). |
 | **Connect the ends** | Joins the last point of the selected line back to the first. |
+| **Fill the inside** | Fills the inside of the line. A line whose ends aren't connected is filled as if they were joined by a straight line. The line is drawn on top of the fill. |
+| **Fill Color** | The fill color. |
 | **Move one handle only** | Dragging a handle doesn't turn the one on the other side, so you can make sharp corners. |
 | **Show guides** | Shows or hides the points and handles, to check how the line really looks. |
 | **New Line** | Finishes the current line, so the next click starts a new one. |
