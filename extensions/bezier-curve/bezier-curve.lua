@@ -477,6 +477,28 @@ local function tip(text)
   pcall(function() app.tip(text, 4) end)
 end
 
+-- A quick second click on the canvas is a double-click, which Aseprite uses
+-- to select a grid tile (and which never reaches the script). The
+-- "Select a grid tile with double-click" preference is turned off while
+-- editing, and turned back on afterwards. The original value is also kept
+-- in the plugin preferences, in case Aseprite closes before it's restored.
+local function disableTileDoubleClick()
+  if prefs.savedDoubleClick ~= nil then return end
+  pcall(function()
+    local v = app.preferences.selection.doubleclick_select_tile
+    if type(v) ~= "boolean" then return end
+    prefs.savedDoubleClick = v
+    app.preferences.selection.doubleclick_select_tile = false
+  end)
+end
+
+local function restoreTileDoubleClick()
+  local v = prefs.savedDoubleClick
+  if v == nil then return end
+  prefs.savedDoubleClick = nil
+  pcall(function() app.preferences.selection.doubleclick_select_tile = v end)
+end
+
 ------------------------------------------------------------------------
 -- Editing operations
 
@@ -1098,6 +1120,7 @@ local function startSession(force)
   }
   S = s
   lastSkip = nil
+  disableTileDoubleClick()
 
   if cel then
     if coversCanvas(sprite, cel) then
@@ -1335,11 +1358,18 @@ local function tick()
     if moved or s.externalChange or pending then finishSession(true) end
   end
 
+  local exiting = false
   if pending then
     local cmd = pending
     pending = nil
     -- Don't edit while the animation plays (it would stop the playback)
     if cmd.name == "PlayAnimation" and app.layer then paused = { layer = app.layer, play = true } end
+    -- Aseprite is closing: put the preference back before it's saved
+    if cmd.name == "Exit" then
+      exiting = true
+      restoreTileDoubleClick()
+      closePanel()
+    end
     local run = app.command[cmd.name]
     if run then
       rerunning = true
@@ -1349,7 +1379,7 @@ local function tick()
   end
 
   if paused and app.layer ~= paused.layer then paused = nil end
-  if not S and not paused then
+  if not S and not paused and not exiting then
     local r = startSession(false)
     if r == "edited" then
       local layer, frame = app.layer, app.frame
@@ -1359,7 +1389,10 @@ local function tick()
       end
     end
   end
-  if not S then closePanel() end
+  if not S then
+    closePanel()
+    restoreTileDoubleClick()
+  end
 end
 
 local function onBeforeCommand(ev)
@@ -1425,6 +1458,7 @@ end
 function init(plugin)
   if not app.isUIAvailable then return end
   prefs = plugin.preferences
+  restoreTileDoubleClick()
 
   local ok, lang = pcall(function() return app.preferences.general.language end)
   if ok and type(lang) == "string" and lang:sub(1, 2) == "ja" then T = TEXT.ja end
@@ -1458,6 +1492,11 @@ function exit(plugin)
   if S then pcall(finishSession, false) end
   S = nil
   closePanel()
+  -- Keep the note of the original value: if Aseprite saved its preferences
+  -- before this, it's put back again at the next start
+  local saved = prefs.savedDoubleClick
+  restoreTileDoubleClick()
+  prefs.savedDoubleClick = saved
   for _, id in ipairs(listeners) do pcall(function() app.events:off(id) end) end
   listeners = {}
   if askTimer then askTimer:stop() end
