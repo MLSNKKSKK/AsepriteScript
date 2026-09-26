@@ -224,8 +224,7 @@ The panel's first section, **Selected Shape**, holds the settings of the selecte
 | **Move one handle only** | Dragging a handle doesn't turn the one on the other side, so you can make sharp corners. |
 | **Show guides** | Shows or hides the points and handles, to check how the shapes really look. |
 | **New Shape** | Finishes the current shape, so the next click starts a new one. |
-| **Duplicate** | Copies the selected shape 4 pixels away (towards the inside of the canvas), right above the original, and selects the copy. |
-| **Copy** / **Paste** | **Copy** copies the selected shape, or all the shapes of the frame when none is selected. **Paste** adds them at the same place to the frame you're editing, which can be another frame, layer or sprite (handy for animation). A single pasted shape gets selected. To copy a whole frame, you can also copy its cel in the timeline (for example by dragging it with Ctrl held down): the curves go along and stay editable. |
+| **Copy** / **Paste** | **Copy** copies the selected shape, or all the shapes of the frame when none is selected. **Paste** adds them at the same place to the frame you're editing, which can be another frame, layer or sprite (handy for animation). When they would land exactly on the same shapes (for example when you paste in the frame you copied from), they go 4 pixels away, towards the inside of the canvas, so Copy and Paste also duplicate shapes. A single pasted shape gets selected. To copy a whole frame, you can also copy its cel in the timeline (for example by dragging it with Ctrl held down): the curves go along and stay editable. |
 | **Delete Shape** / **Delete Point** | Deletes the selected shape / point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
 | **Transform Box**, **Numeric...**, **Flip**, **Rotate**, **Keep proportions** | Transform the shapes (see below). |

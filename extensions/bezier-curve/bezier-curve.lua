@@ -44,7 +44,6 @@ local TEXT = {
     oneSide = "Move one handle only",
     guides = "Show guides",
     newShape = "New Shape",
-    duplicate = "Duplicate",
     deleteShape = "Delete Shape",
     copy = "Copy",
     paste = "Paste",
@@ -116,7 +115,6 @@ local TEXT = {
     oneSide = "ハンドルを片側だけ動かす",
     guides = "ガイドを表示",
     newShape = "新しい図形",
-    duplicate = "図形を複製",
     deleteShape = "図形を削除",
     copy = "コピー",
     paste = "貼り付け",
@@ -1157,7 +1155,6 @@ local function updateButtons()
   dlg:modify{ id = "antialias", enabled = not indexed }
   dlg:modify{ id = "pixelPerfect", enabled = indexed or not dlg.data.antialias }
   dlg:modify{ id = "closed", enabled = p ~= nil }
-  dlg:modify{ id = "duplicate", enabled = p ~= nil }
   dlg:modify{ id = "copy", enabled = #s.paths > 0 }
   dlg:modify{ id = "paste", enabled = clipboard ~= nil }
   dlg:modify{ id = "deleteLine", enabled = p ~= nil }
@@ -2084,25 +2081,6 @@ local function transformLines(s, makeFn)
   askTimer:start()
 end
 
--- Copies the selected line a few pixels away (towards the inside of the
--- canvas), right above the original, and selects the copy
-local function duplicateShape(s)
-  local p = s.paths[s.active]
-  if not p then return end
-  local copy = parse(serialize({ p }))[1]
-  local x0, y0, x1, y1 = pathBounds(s.paths, { s.active })
-  local dx = (x1 + 4 <= s.sprite.width - 1 or x0 - 4 < 0) and 4 or -4
-  local dy = (y1 + 4 <= s.sprite.height - 1 or y0 - 4 < 0) and 4 or -4
-  local at = s.active + 1
-  edit(function()
-    mapNodes({ copy }, copyNodes({ copy }, { 1 }), function(x, y) return x + dx, y + dy end)
-    table.insert(s.paths, at, copy)
-    s.drawing = false
-    select(at, nil)
-  end)
-  askTimer:start()
-end
-
 -- Copies the selected line, or all lines when none is selected
 local function copyShapes(s)
   local list = {}
@@ -2113,11 +2091,42 @@ local function copyShapes(s)
   updateButtons()
 end
 
--- Adds the copied lines where they were, on top of the others. A single
--- pasted line gets selected.
+-- The shape of a line (its points and handles), to find copies of it
+local function shapeKey(p)
+  local t = { p.closed and "closed" or "open" }
+  for _, n in ipairs(p.nodes) do
+    t[#t + 1] = string.format("%d %d %.2f %.2f %.2f %.2f", n.x, n.y, n.ix, n.iy, n.ox, n.oy)
+  end
+  return table.concat(t, ";")
+end
+
+-- Adds the copied lines where they were, on top of the others. Pasted onto
+-- the same lines (e.g. in the frame they were copied from), they go a few
+-- pixels away (towards the inside of the canvas) so they can be seen.
+-- A single pasted line gets selected.
 local function pasteShapes(s)
   local list = clipboard and parse(clipboard) or {}
   if #list == 0 then return end
+  local taken = {}
+  for _, p in ipairs(s.paths) do taken[shapeKey(p)] = true end
+  local function onTop()
+    for _, p in ipairs(list) do
+      if taken[shapeKey(p)] then return true end
+    end
+    return false
+  end
+  if onTop() then
+    local all = {}
+    for i = 1, #list do all[i] = i end
+    local x0, y0, x1, y1 = pathBounds(list, all)
+    local dx = (x1 + 4 <= s.sprite.width - 1 or x0 - 4 < 0) and 4 or -4
+    local dy = (y1 + 4 <= s.sprite.height - 1 or y0 - 4 < 0) and 4 or -4
+    local orig = copyNodes(list, all)
+    for k = 1, 64 do
+      mapNodes(list, orig, function(x, y) return x + k * dx, y + k * dy end)
+      if not onTop() then break end
+    end
+  end
   edit(function()
     for _, p in ipairs(list) do s.paths[#s.paths + 1] = p end
     s.drawing = false
@@ -2266,7 +2275,6 @@ openPanel = function()
                 refresh()
                 askTimer:start()
               end) }
-     :button{ id = "duplicate", text = T.duplicate, onclick = whenEditing(duplicateShape) }
      :button{ id = "deleteLine", text = T.deleteShape,
               onclick = whenEditing(function(s)
                 if not s.paths[s.active] then return end
