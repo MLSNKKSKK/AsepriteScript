@@ -244,11 +244,12 @@ Transforms work on the selected shape, or on all the shapes of the frame when no
   | Mode | Handles | Drag them to |
   | --- | --- | --- |
   | Scale | Squares at the corners and sides | Scale. The opposite side stays in place. Dragging past it flips the lines. With **Keep proportions** checked, the corners keep the width and height in proportion. |
-  | Rotate/shear | Circles at the corners | Rotate around the middle (marked with a small cross). The angle snaps to multiples of 15° when it's close. |
-  | | Diamonds on the sides | Shear: the side slides along, the opposite side stays. |
+  | Rotate/shear | Circles at the corners | Rotate around the center (the small cross). The angle snaps to multiples of 15° when it's close. |
+  | | Diamonds on the sides | Shear: the side slides along, and the line through the center stays. To keep the opposite side in place, move the center onto it first. |
+  | | The cross | Moves the center that rotating and shearing work around, for example onto a point to turn the shape around it. It snaps to the points of the shape, to the corners and the middles of the sides of its area, and back to the middle. It moves along when the shape is moved or scaled, and goes back to the middle when the transform box is closed. |
 
   Drag inside the box to move the lines. Enter, Esc, a click outside the box or **End Transform** finishes.
-- **Numeric...** asks for the width and height (%), a rotation (degrees, clockwise) and a horizontal and vertical shear (degrees), and shows the result while you type. Everything happens around the middle of the lines.
+- **Numeric...** asks for the width and height (%), a rotation (degrees, clockwise) and a horizontal and vertical shear (degrees), and shows the result while you type. Everything happens around the middle of the shapes, or around the center of the transform box if you moved it.
 - **Flip Horizontal** / **Flip Vertical** and **Rotate Left 90°** / **Rotate Right 90°** work right away. Aseprite's own **Edit > Flip Horizontal** / **Flip Vertical** (Shift+H / Shift+V) and **Edit > Rotate** do the same while a curve layer is being edited. (**Sprite > Rotate Canvas** and **Sprite > Flip Canvas Horizontal** / **Vertical** still work on the pixels of the whole sprite.)
 
 ### Rasterizing

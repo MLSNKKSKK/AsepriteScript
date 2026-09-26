@@ -61,7 +61,7 @@ local TEXT = {
     rotateRight = "Rotate Right 90°",
     keepRatio = "Keep proportions (corner handles)",
     hintScale = "Transform: drag the squares to scale, inside to move. Click inside: rotate/shear. Enter, Esc or click outside: done",
-    hintRotate = "Transform: drag the circles to rotate, the diamonds to shear, inside to move. Click inside: scale. Enter, Esc or click outside: done",
+    hintRotate = "Transform: drag the circles to rotate, the diamonds to shear, the cross to move the center. Click inside: scale. Enter, Esc or click outside: done",
     numericTitle = "Transform",
     scaleX = "Width (%)",
     scaleY = "Height (%)",
@@ -128,7 +128,7 @@ local TEXT = {
     rotateRight = "右に90°回転",
     keepRatio = "縦横比を保つ(角のハンドル)",
     hintScale = "変形: 四角をドラッグで拡大縮小、内側をドラッグで移動。内側をクリックで回転・シアーに切り替え。Enter・Esc・外側をクリックで終了",
-    hintRotate = "変形: 丸をドラッグで回転、ひし形をドラッグでシアー、内側をドラッグで移動。内側をクリックで拡大縮小に切り替え。Enter・Esc・外側をクリックで終了",
+    hintRotate = "変形: 丸をドラッグで回転、ひし形でシアー、十字で中心を移動。内側をクリックで拡大縮小に切り替え。Enter・Esc・外側をクリックで終了",
     numericTitle = "数値で変形",
     scaleX = "横幅(%)",
     scaleY = "高さ(%)",
@@ -1195,6 +1195,14 @@ local function xfBox()
   }
 end
 
+-- The center that rotating and shearing work around: where the user put it,
+-- or the middle of the lines
+local function xfPivot(b)
+  local pv = S.xf and S.xf.pivot
+  if pv then return pv.x, pv.y end
+  return turnCenter(b.x0, b.y0, b.x1, b.y1)
+end
+
 -- Pixels of the handle shapes, around their center
 local CIRCLE, DIAMOND, RING, PLUS = {}, {}, {}, {}
 for dy = -2, 2 do
@@ -1270,8 +1278,8 @@ local function addGuides(want)
       end
     end
     if rotating then
-      -- The point the lines turn around
-      local cx, cy = turnCenter(b.x0, b.y0, b.x1, b.y1)
+      -- The center (a cross that can be dragged)
+      local cx, cy = xfPivot(b)
       cx, cy = floor(cx), floor(cy)
       for _, o in ipairs(PLUS) do put(cx + o[1], cy + o[2], outer) end
       put(cx, cy, inner or outer)
@@ -1393,7 +1401,7 @@ end
 
 local function snapshot()
   local s = S
-  return { data = serialize(s.paths), active = s.active, sel = s.selNode }
+  return { data = serialize(s.paths), active = s.active, sel = s.selNode, pivot = s.xf and s.xf.pivot }
 end
 
 -- Adds an undo step if the lines changed since `before`
@@ -1424,6 +1432,7 @@ local function restore(snap)
   s.active, s.selNode = snap.active, snap.sel
   if not s.paths[s.active] then s.active, s.selNode = nil, nil end
   if s.active and s.selNode and not s.paths[s.active].nodes[s.selNode] then s.selNode = nil end
+  if s.xf then s.xf.pivot = snap.pivot end
   s.lastMerge, s.press = nil, nil
   syncFields()
   refresh()
@@ -1577,21 +1586,50 @@ local function addPoint(x, y)
   return { kind = "anchor", path = s.active, node = s.selNode }
 end
 
+-- Where the center goes when dragged to (x, y): it snaps to the points of
+-- the lines, to the corners and the middles of the sides of their area, and
+-- back to the middle (nil)
+local function snapPivot(b, x, y)
+  local s = S
+  local best, bestD = nil, math.max(tolerance(), 1.5) + 0.001
+  local function try(px, py, middle)
+    local d = dist(x, y, px, py)
+    if d < bestD then best, bestD = { x = px, y = py, middle = middle }, d end
+  end
+  local cx, cy = turnCenter(b.x0, b.y0, b.x1, b.y1)
+  try(cx, cy, true)
+  for _, rx in ipairs({ b.x0, (b.x0 + b.x1) / 2, b.x1 }) do
+    for _, ry in ipairs({ b.y0, (b.y0 + b.y1) / 2, b.y1 }) do try(round(rx), round(ry)) end
+  end
+  for _, pi in ipairs(xfTargets()) do
+    for _, n in ipairs(s.paths[pi].nodes) do try(n.x, n.y) end
+  end
+  if not best then return { x = x, y = y } end
+  if best.middle then return nil end
+  return { x = best.x, y = best.y }
+end
+
 -- The mouse button went down at (x, y): decide what the drag will do
 local function startGesture(x, y)
   local s = S
   s.lastMerge = nil
   local before = snapshot()
   if s.xf then
-    -- A handle of the box, inside the box (move), or outside (done)
+    -- A handle of the box, the center (while rotating), inside the box
+    -- (move), or outside (done). The nearest handle or center wins.
     local b = xfBox()
     local press = { kind = "xfOut", before = before, sx = x, sy = y, box = b, mode = s.xf.mode,
-                    orig = copyNodes(s.paths, xfTargets()) }
+                    orig = copyNodes(s.paths, xfTargets()), pivot = s.xf.pivot }
     if b then
+      press.px, press.py = xfPivot(b)
       local bestD = math.max(tolerance(), 2.5) + 0.001
       for _, h in ipairs(b.handles) do
         local d = dist(x, y, h[2], h[3])
         if d < bestD then press.kind, press.handle, bestD = "xfHandle", h[1], d end
+      end
+      local d = dist(x, y, press.px, press.py)
+      if s.xf.mode == "rotate" and d <= math.max(tolerance(), 1.5) and d <= bestD then
+        press.kind, press.handle = "xfPivot", nil
       end
       if press.kind == "xfOut" and x >= b.ex0 and x <= b.ex1 and y >= b.ey0 and y <= b.ey1 then
         press.kind = "xfMove"
@@ -1629,7 +1667,7 @@ local function handleTransform(d, x, y)
   local dx, dy = x - d.sx, y - d.sy
   if d.mode == "rotate" and #h == 2 then
     -- Rotate around the center, snapping to multiples of 15 degrees
-    local cx, cy = turnCenter(b.x0, b.y0, b.x1, b.y1)
+    local cx, cy = d.px, d.py
     local a = math.atan(y - cy, x - cx) - math.atan(d.sy - cy, d.sx - cx)
     local deg = math.deg(a)
     local snap = round(deg / 15) * 15
@@ -1640,18 +1678,17 @@ local function handleTransform(d, x, y)
       return cx + ux * c - uy * sn, cy + ux * sn + uy * c
     end
   elseif d.mode == "rotate" then
-    -- Shear: the dragged side slides along, the opposite side stays
+    -- Shear: the dragged side slides along (following the pointer), and
+    -- the line through the center stays
     if h == "n" or h == "s" then
-      local ay = h == "n" and b.y1 or b.y0
-      local span = (h == "n" and b.y0 or b.y1) - ay
-      if span == 0 then return nil end
-      local k = dx / span
+      local span = d.sy - d.py
+      if abs(span) < 0.5 then return nil end
+      local k, ay = dx / span, d.py
       return function(px, py) return px + k * (py - ay), py end
     end
-    local ax = h == "w" and b.x1 or b.x0
-    local span = (h == "w" and b.x0 or b.x1) - ax
-    if span == 0 then return nil end
-    local k = dy / span
+    local span = d.sx - d.px
+    if abs(span) < 0.5 then return nil end
+    local k, ax = dy / span, d.px
     return function(px, py) return px, py + k * (px - ax) end
   end
   -- Scale: the dragged side (or corner) moves, the opposite one stays
@@ -1671,13 +1708,24 @@ end
 local function dragTo(x, y)
   local s = S
   local d = s.press
-  if d.kind == "xfHandle" then
-    mapNodes(s.paths, d.orig, handleTransform(d, x, y) or function(px, py) return px, py end)
+  if d.kind == "xfHandle" or d.kind == "xfMove" then
+    local fn
+    if d.kind == "xfMove" then
+      local dx, dy = x - d.sx, y - d.sy
+      if dx ~= 0 or dy ~= 0 then d.moved = true end
+      fn = function(px, py) return px + dx, py + dy end
+    else
+      fn = handleTransform(d, x, y) or function(px, py) return px, py end
+    end
+    mapNodes(s.paths, d.orig, fn)
+    -- A center the user put somewhere moves with the lines
+    if d.pivot then
+      local px, py = fn(d.pivot.x, d.pivot.y)
+      s.xf.pivot = { x = round(px), y = round(py) }
+    end
     return
-  elseif d.kind == "xfMove" then
-    local dx, dy = x - d.sx, y - d.sy
-    if dx ~= 0 or dy ~= 0 then d.moved = true end
-    mapNodes(s.paths, d.orig, function(px, py) return px + dx, py + dy end)
+  elseif d.kind == "xfPivot" then
+    s.xf.pivot = snapPivot(d.box, x, y)
     return
   elseif d.kind == "xfOut" then
     return
@@ -1977,7 +2025,14 @@ local function transformLines(s, makeFn)
   local x0, y0, x1, y1 = pathBounds(s.paths, list)
   if not x0 then return end
   local orig = copyNodes(s.paths, list)
-  edit(function() mapNodes(s.paths, orig, makeFn(x0, y0, x1, y1)) end)
+  local fn = makeFn(x0, y0, x1, y1)
+  edit(function()
+    mapNodes(s.paths, orig, fn)
+    if s.xf and s.xf.pivot then
+      local px, py = fn(s.xf.pivot.x, s.xf.pivot.y)
+      s.xf.pivot = { x = round(px), y = round(py) }
+    end
+  end)
   askTimer:start()
 end
 
@@ -1986,7 +2041,9 @@ local function numericTransform(s)
   local list = xfTargets()
   local x0, y0, x1, y1 = pathBounds(s.paths, list)
   if not x0 then return end
+  -- Around the center of the transform box if it was moved, else the middle
   local cx, cy = turnCenter(x0, y0, x1, y1)
+  if s.xf and s.xf.pivot then cx, cy = s.xf.pivot.x, s.xf.pivot.y end
   local before = snapshot()
   local orig = copyNodes(s.paths, list)
   local dlg
@@ -1998,8 +2055,8 @@ local function numericTransform(s)
     local tx, ty = math.tan(angle(d.shearX)), math.tan(angle(d.shearY))
     local a = math.rad(d.rotate or 0)
     local c, sn = math.cos(a), math.sin(a)
-    -- Scale, then shear (positive: the top moves right, the right side moves
-    -- down), then rotate, all around the center
+    -- Scale, then shear (positive: above the center moves right, right of
+    -- it moves down), then rotate, all around the center
     mapNodes(s.paths, orig, function(px, py)
       local ux, uy = (px - cx) * sx, (py - cy) * sy
       ux = ux - tx * uy
