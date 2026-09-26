@@ -2219,6 +2219,20 @@ openPanel = function()
     panel = nil
     stopEditing()
   end }
+  -- A color picker goes on the row of the checkbox before it, with a small
+  -- label, where Aseprite can do that (Dialog:samerow); otherwise it gets a
+  -- row of its own
+  local sameRow = false
+  pcall(function() sameRow = dlg.samerow ~= nil end)
+  local function colorField(t, text)
+    if sameRow then
+      dlg:samerow():label{ text = text, hexpand = false }:samerow():color(t)
+    else
+      t.label = text
+      dlg:color(t)
+    end
+    return dlg
+  end
   dlg:label{ text = T.help1 }
      :newrow()
      :label{ text = T.help2 }
@@ -2261,10 +2275,10 @@ openPanel = function()
              onclick = function()
                changeStyle("stroke", function(p) p.stroke = dlg.data.stroke end)
              end }
-     :color{ id = "color", label = T.color, color = app.fgColor,
-             onchange = function()
-               changeStyle("color", function(p) p.color = colorToTable(dlg.data.color) end)
-             end }
+  colorField({ id = "color", color = app.fgColor,
+               onchange = function()
+                 changeStyle("color", function(p) p.color = colorToTable(dlg.data.color) end)
+               end }, T.color)
      :slider{ id = "width", label = T.width, min = 1, max = 32, value = prefs.width or 1,
               onchange = function()
                 changeStyle("width", function(p) p.width = dlg.data.width end)
@@ -2278,10 +2292,10 @@ openPanel = function()
              onclick = function()
                changeStyle("fill", function(p) p.fill = dlg.data.fill end)
              end }
-     :color{ id = "fillColor", label = T.fillColor, color = app.fgColor,
-             onchange = function()
-               changeStyle("fillColor", function(p) p.fillColor = colorToTable(dlg.data.fillColor) end)
-             end }
+  colorField({ id = "fillColor", color = app.fgColor,
+               onchange = function()
+                 changeStyle("fillColor", function(p) p.fillColor = colorToTable(dlg.data.fillColor) end)
+               end }, T.fillColor)
      -- Editing options
      :separator{}
      :check{ id = "oneSide", label = "", text = T.oneSide, selected = false }
