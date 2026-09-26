@@ -24,7 +24,7 @@ local TEXT = {
     hint = "Bezier Curve: click to add points, drag points or handles to edit them",
     hintDrawing = "Bezier Curve: drawing a shape (other shapes can't be grabbed). Esc, Enter or click its last point: done",
     help1 = "Click to add points, drag points or handles to bend.",
-    help2 = "Click a line to add a point there. Del: delete the point.",
+    help2 = "Click a line to select it, again to add a point. Del: delete the point.",
     nextShape = "Next Shape",
     selectedShape = "Selected Shape",
     drawingShape = "Drawing a Shape (Esc/Enter: done)",
@@ -97,7 +97,7 @@ local TEXT = {
     hint = "ベジェ曲線: クリックで点を追加、点やハンドルをドラッグで編集",
     hintDrawing = "ベジェ曲線: 図形を描いています(ほかの図形はつかめません)。Esc・Enter・最後の点をクリックで終了",
     help1 = "クリックで点を追加、点やハンドルをドラッグで曲げる",
-    help2 = "線をクリックでそこに点を追加 / Del: 点を削除",
+    help2 = "線をクリックで選択(選択中なら点を追加) / Del: 点を削除",
     nextShape = "次に描く図形",
     selectedShape = "選択中の図形",
     drawingShape = "図形を描画中(Esc / Enter で終了)",
@@ -1697,11 +1697,14 @@ local function startGesture(x, y)
     s.press = { kind = "anchor", hit = hit, before = before, sx = x, sy = y, x = n.x, y = n.y,
                 finishes = finishes }
   elseif hit then
+    -- Clicking the line of the selected shape adds a point; clicking another
+    -- shape's line only selects it
+    local addsPoint = hit.path == s.active
     select(hit.path, nil)
     local orig = {}
     for i, n in ipairs(s.paths[hit.path].nodes) do orig[i] = { n.x, n.y } end
     s.press = { kind = "segment", hit = hit, before = before, sx = x, sy = y, orig = orig,
-                pivot = s.paths[hit.path].pivot }
+                pivot = s.paths[hit.path].pivot, addsPoint = addsPoint }
   else
     s.press = { kind = "pull", hit = addPoint(x, y), before = before }
   end
@@ -1802,7 +1805,7 @@ local function endGesture(x, y, dragged)
   local d = s.press
   if dragged then dragTo(x, y) end
   s.press = nil
-  if d.kind == "segment" and not d.moved then
+  if d.kind == "segment" and not d.moved and d.addsPoint then
     select(d.hit.path, insertNode(s.paths[d.hit.path], d.hit.seg, d.hit.t))
   end
   local clicked = x == d.sx and y == d.sy

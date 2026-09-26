@@ -194,7 +194,7 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 | Click the last point of the shape you're drawing, or press **Enter** | Finishes the shape. The next click on an empty spot starts a new one. |
 | Drag a point | Moves the point. |
 | Drag a handle | Changes how the line bends. The handle on the other side turns with it, unless **Move one handle only** is checked. |
-| Click a line | Adds a point there without changing the shape. |
+| Click a line | Selects its shape. Clicking a line of the selected shape adds a point there without changing its form. |
 | Drag a line | Moves the whole shape. |
 | Click a point | Selects it (it gets a white outline). |
 | **Delete** / **Backspace** | Deletes the selected point. |
