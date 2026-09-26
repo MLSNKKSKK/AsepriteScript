@@ -177,6 +177,7 @@ An extension that adds **curve layers**. Lines on a curve layer are drawn with B
 - Several lines per layer, each with its own color and width (1–32 px, round brush)
 - Pixel-perfect option for clean 1px lines, or antialiasing for smooth edges (RGB and Grayscale)
 - Closed shapes (connect the last point to the first), and filling the inside with a color, with or without the line
+- Basic shapes to place: circles, rectangles, rounded rectangles, triangles, polygons and stars
 - Transform lines: scale, rotate, shear, flip and move them with a box on the canvas, or type exact values
 - Each frame has its own lines
 - Works with RGB, Grayscale and Indexed sprites
@@ -211,11 +212,12 @@ While you edit, the points and handles are shown on the curve layer in bright gr
 
 Grayscale sprites can't show green, and neither can Indexed sprites whose palette has no green, so there the guides are black and white instead: points are hollow squares with black corners and white sides (the selected point the other way around), handles are dotted in black and white, and each handle end is a filled square with a black outline and a white center. Adding a bright green to an Indexed palette makes the guides green. They disappear when you leave the layer. Zoom in to work comfortably.
 
-At the top of the panel, below a short help text, are the buttons for new shapes, deleting, copying and pasting. Below them, the **Selected Shape** section holds the settings of the selected shape. It has two groups: **Line** for the line around the shape, and **Fill** for its inside.
+At the top of the panel, below a short help text, are the buttons for drawing and placing new shapes, deleting, copying and pasting. Below them, the **Selected Shape** section holds the settings of the selected shape. It has two groups: **Line** for the line around the shape, and **Fill** for its inside.
 
 | Panel | Description |
 | --- | --- |
 | **Draw New** | Finishes the current shape, so the next click starts a new one. |
+| **Place Shape...** | Places a basic shape: a circle, rectangle, rounded rectangle, triangle, polygon or star. Choose it (and the number of corners, or the rounding), then drag on the canvas: the shape fills the box you drag, and updates while you drag. A click places it at a default size. **Same width and height** makes circles, squares and regular polygons (instead of Shift, which scripts can't read). The shape uses the settings in the panel, is closed, and can be edited like any other. Esc or Enter cancels. |
 | **Delete Shape** | Deletes the selected shape. |
 | **Copy** / **Paste** | **Copy** copies the selected shape, or all the shapes of the frame when none is selected. **Paste** adds them at the same place to the frame you're editing, which can be another frame, layer or sprite (handy for animation). When they would land exactly on the same shapes (for example when you paste in the frame you copied from), they go 4 pixels away, towards the inside of the canvas, so Copy and Paste also duplicate shapes. A single pasted shape gets selected. To copy a whole frame, you can also copy its cel in the timeline (for example by dragging it with Ctrl held down): the curves go along and stay editable. |
 | **Antialias (smooth edges)** | Smooths the edges of the line and the fill with partly transparent pixels. Where shapes overlap, they blend with each other. RGB and Grayscale only: Indexed sprites can't have partly transparent pixels, so there it's turned off. |

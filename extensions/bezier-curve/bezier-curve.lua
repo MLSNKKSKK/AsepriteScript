@@ -44,6 +44,16 @@ local TEXT = {
     oneSide = "Move one handle only",
     guides = "Show guides",
     newShape = "Draw New",
+    place = "Place Shape...",
+    placeTitle = "Place Shape",
+    shapeKind = "Shape",
+    shapes = { ellipse = "Circle", rect = "Rectangle", roundRect = "Rounded Rectangle",
+               triangle = "Triangle", polygon = "Polygon", star = "Star" },
+    sides = "Corners",
+    rounding = "Rounding (%)",
+    sameSize = "Same width and height (circle, square...)",
+    placingShape = "Placing a Shape (drag; Esc: cancel)",
+    hintPlace = "Bezier Curve: drag to place the shape (a click places it at a default size). Esc: cancel",
     deleteShape = "Delete Shape",
     copy = "Copy",
     paste = "Paste",
@@ -115,6 +125,16 @@ local TEXT = {
     oneSide = "ハンドルを片側だけ動かす",
     guides = "ガイドを表示",
     newShape = "新しく作図",
+    place = "図形を配置…",
+    placeTitle = "図形を配置",
+    shapeKind = "形",
+    shapes = { ellipse = "円", rect = "四角", roundRect = "角丸四角",
+               triangle = "三角", polygon = "多角形", star = "星" },
+    sides = "角の数",
+    rounding = "角の丸み(%)",
+    sameSize = "縦横を同じにする(正円・正方形など)",
+    placingShape = "図形を配置中(ドラッグで配置、Esc でやめる)",
+    hintPlace = "ベジェ曲線: ドラッグで図形を配置(クリックで標準の大きさ)。Esc でやめる",
     deleteShape = "図形を削除",
     copy = "コピー",
     paste = "貼り付け",
@@ -1092,6 +1112,71 @@ local function rotateFn(quarters)
 end
 
 ------------------------------------------------------------------------
+-- Basic shapes (Place Shape)
+
+local SHAPE_KINDS = { "ellipse", "rect", "roundRect", "triangle", "polygon", "star" }
+local KAPPA = 0.5523   -- handle length for a quarter circle, as a part of the radius
+
+-- A point at (x, y) with handles (offsets). It lands on a whole pixel, and
+-- its handles keep pointing at the same places.
+local function shapeNode(x, y, ix, iy, ox, oy)
+  local n = { x = round(x), y = round(y), ix = 0, iy = 0, ox = 0, oy = 0 }
+  if ix ~= 0 or iy ~= 0 then n.ix, n.iy = x + ix - n.x, y + iy - n.y end
+  if ox ~= 0 or oy ~= 0 then n.ox, n.oy = x + ox - n.x, y + oy - n.y end
+  n.smooth = (ix ~= 0 or iy ~= 0) and (ox ~= 0 or oy ~= 0)
+  return n
+end
+
+-- Joins points of a closed shape that landed on the same pixel
+local function mergeSame(nodes)
+  local out = {}
+  for _, n in ipairs(nodes) do
+    local last = out[#out]
+    if last and last.x == n.x and last.y == n.y then
+      last.ox, last.oy, last.smooth = n.ox, n.oy, false
+    else
+      out[#out + 1] = n
+    end
+  end
+  while #out > 1 and out[1].x == out[#out].x and out[1].y == out[#out].y do
+    local last = table.remove(out)
+    out[1].ix, out[1].iy, out[1].smooth = last.ix, last.iy, false
+  end
+  return out
+end
+
+-- The points of a basic shape that fills the box (x0, y0) - (x1, y1)
+local function shapeNodes(kind, opt, x0, y0, x1, y1)
+  local cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+  local N = shapeNode
+  if kind == "rect" then
+    return mergeSame{ N(x0, y0, 0, 0, 0, 0), N(x1, y0, 0, 0, 0, 0), N(x1, y1, 0, 0, 0, 0), N(x0, y1, 0, 0, 0, 0) }
+  elseif kind == "ellipse" then
+    local kx, ky = KAPPA * rx, KAPPA * ry
+    return mergeSame{ N(cx, y0, -kx, 0, kx, 0), N(x1, cy, 0, -ky, 0, ky),
+                      N(cx, y1, kx, 0, -kx, 0), N(x0, cy, 0, ky, 0, -ky) }
+  elseif kind == "roundRect" then
+    local r = math.min(rx, ry) * (opt.rounding or 30) / 100
+    local k = KAPPA * r
+    return mergeSame{ N(x0 + r, y0, -k, 0, 0, 0), N(x1 - r, y0, 0, 0, k, 0),
+                      N(x1, y0 + r, 0, -k, 0, 0), N(x1, y1 - r, 0, 0, 0, k),
+                      N(x1 - r, y1, k, 0, 0, 0), N(x0 + r, y1, 0, 0, -k, 0),
+                      N(x0, y1 - r, 0, k, 0, 0), N(x0, y0 + r, 0, 0, 0, -k) }
+  elseif kind == "triangle" then
+    return mergeSame{ N(cx, y0, 0, 0, 0, 0), N(x1, y1, 0, 0, 0, 0), N(x0, y1, 0, 0, 0, 0) }
+  end
+  -- A polygon or a star, starting at the top
+  local count = kind == "star" and opt.sides * 2 or opt.sides
+  local list = {}
+  for i = 0, count - 1 do
+    local a = -math.pi / 2 + 2 * math.pi * i / count
+    local q = (kind == "star" and i % 2 == 1) and 0.4 or 1
+    list[#list + 1] = N(cx + rx * q * math.cos(a), cy + ry * q * math.sin(a), 0, 0, 0, 0)
+  end
+  return mergeSame(list)
+end
+
+------------------------------------------------------------------------
 -- Panel fields
 
 local function syncFields()
@@ -1115,6 +1200,7 @@ local function syncFields()
     dlg:modify{ id = "closed", selected = false }
     dlg:modify{ id = "styleSep", text = s.drawing and T.drawingShape or T.nextShape }
   end
+  if s.placing then dlg:modify{ id = "styleSep", text = T.placingShape } end
   -- Transforms work on the selected line, or on all lines when none is selected
   dlg:modify{ id = "xfSep", text = p and T.transformSelected or T.transformAll }
   dlg:modify{ id = "transform", text = s.xf and T.endTransform or T.transformBox }
@@ -1621,22 +1707,28 @@ local function hitTest(x, y)
 end
 
 -- Adds a point to the end of the selected line, or starts a new line
+-- A new line (without points) with the settings in the panel
+local function newStyledPath()
+  local s = S
+  local color, width, perfect, fill, fillColor, stroke = app.fgColor, 1, true, false, app.fgColor, true
+  local aa = false
+  if panel then
+    local d = panel.data
+    color, width, perfect, fill, fillColor, stroke =
+      d.color, d.width, d.pixelPerfect, d.fill, d.fillColor, d.stroke
+    aa = d.antialias and s.sprite.colorMode ~= ColorMode.INDEXED
+  end
+  return { color = colorToTable(color), width = width, pixelPerfect = perfect, stroke = stroke,
+           antialias = aa, fill = fill, fillColor = colorToTable(fillColor), closed = false, nodes = {} }
+end
+
 local function addPoint(x, y)
   local s = S
   local wasDrawing = s.drawing
   s.drawing = true
   local p = s.paths[s.active]
   if not p or p.closed then
-    local color, width, perfect, fill, fillColor, stroke = app.fgColor, 1, true, false, app.fgColor, true
-    local aa = false
-    if panel then
-      local d = panel.data
-      color, width, perfect, fill, fillColor, stroke =
-        d.color, d.width, d.pixelPerfect, d.fill, d.fillColor, d.stroke
-      aa = d.antialias and s.sprite.colorMode ~= ColorMode.INDEXED
-    end
-    p = { color = colorToTable(color), width = width, pixelPerfect = perfect, stroke = stroke,
-          antialias = aa, fill = fill, fillColor = colorToTable(fillColor), closed = false, nodes = {} }
+    p = newStyledPath()
     s.paths[#s.paths + 1] = p
     select(#s.paths, nil)
   end
@@ -1670,10 +1762,30 @@ local function snapPivot(b, x, y)
 end
 
 -- The mouse button went down at (x, y): decide what the drag will do
+-- The box a shape is placed in, dragged from (d.sx, d.sy) to (x, y)
+local function placeBox(d, x, y)
+  local sx, sy = d.sx, d.sy
+  if d.placing.square then
+    local m = math.max(abs(x - sx), abs(y - sy))
+    x, y = sx + (x >= sx and m or -m), sy + (y >= sy and m or -m)
+  end
+  return math.min(sx, x), math.min(sy, y), math.max(sx, x), math.max(sy, y)
+end
+
 local function startGesture(x, y)
   local s = S
   s.lastMerge = nil
   local before = snapshot()
+  if s.placing then
+    -- Place Shape: the drag sets the box of the new shape
+    local p = newStyledPath()
+    p.closed = true
+    s.paths[#s.paths + 1] = p
+    select(#s.paths, nil)
+    s.press = { kind = "place", before = before, sx = x, sy = y, path = #s.paths, placing = s.placing }
+    p.nodes = shapeNodes(s.placing.kind, s.placing, x, y, x, y)
+    return
+  end
   if s.xf then
     -- A handle of the box, the center (while rotating), inside the box
     -- (move), or outside (done). The nearest handle or center wins.
@@ -1777,7 +1889,11 @@ end
 local function dragTo(x, y)
   local s = S
   local d = s.press
-  if d.kind == "xfHandle" or d.kind == "xfMove" then
+  if d.kind == "place" then
+    local x0, y0, x1, y1 = placeBox(d, x, y)
+    s.paths[d.path].nodes = shapeNodes(d.placing.kind, d.placing, x0, y0, x1, y1)
+    return
+  elseif d.kind == "xfHandle" or d.kind == "xfMove" then
     local fn
     if d.kind == "xfMove" then
       local dx, dy = x - d.sx, y - d.sy
@@ -1828,7 +1944,16 @@ local function endGesture(x, y, dragged)
     select(d.hit.path, insertNode(s.paths[d.hit.path], d.hit.seg, d.hit.t))
   end
   local clicked = x == d.sx and y == d.sy
-  if d.kind == "xfMove" and not d.moved and s.xf then
+  if d.kind == "place" then
+    if clicked then
+      -- A click places the shape at a default size, centered on it
+      local h = math.max(2, math.min(16, math.min(s.sprite.width, s.sprite.height) // 4))
+      s.paths[d.path].nodes = shapeNodes(d.placing.kind, d.placing, x - h, y - h, x + h, y + h)
+    end
+    s.placing = nil
+    select(d.path, nil)
+    syncFields()
+  elseif d.kind == "xfMove" and not d.moved and s.xf then
     -- A click inside the box switches between scaling and rotating/shearing
     s.xf.mode = s.xf.mode == "rotate" and "scale" or "rotate"
   elseif d.kind == "xfOut" and clicked then
@@ -1883,6 +2008,10 @@ local function onCancel()
     local before = s.press.before
     s.press = nil
     restore(before)
+  elseif s.placing then
+    s.placing = nil
+    syncFields()
+    refresh()
   elseif s.xf then
     s.xf = nil
     syncFields()
@@ -1903,6 +2032,8 @@ local function ask()
   if s.xf then
     title = s.xf.mode == "rotate" and T.hintRotate or T.hintScale
     n = nil
+  elseif s.placing then
+    title, n = T.hintPlace, nil
   end
   s.editor:askPoint{ title = title, point = n and Point(n.x, n.y) or nil,
                      onchange = onChange, onclick = onClick, oncancel = onCancel }
@@ -2082,6 +2213,7 @@ end
 
 -- Turns the transform box on or off
 local function toggleTransform(s)
+  s.placing = nil
   if s.xf then
     s.xf = nil
   elseif #s.paths > 0 then
@@ -2161,6 +2293,40 @@ local function pasteShapes(s)
     if #list == 1 then select(#s.paths, nil) else select(nil, nil) end
   end)
   syncFields()
+  askTimer:start()
+end
+
+-- Place Shape: asks for the kind of shape; then the next drag on the canvas
+-- places it
+local function placeShapeDialog(s)
+  local names, kinds = {}, {}
+  for i, k in ipairs(SHAPE_KINDS) do names[i], kinds[T.shapes[k]] = T.shapes[k], k end
+  local dlg = Dialog{ title = T.placeTitle }
+  local function update()
+    local k = kinds[dlg.data.kind]
+    dlg:modify{ id = "sides", enabled = k == "polygon" or k == "star" }
+    dlg:modify{ id = "rounding", enabled = k == "roundRect" }
+  end
+  dlg:combobox{ id = "kind", label = T.shapeKind, option = T.shapes[prefs.placeKind or "ellipse"] or names[1],
+                options = names, onchange = update }
+     :number{ id = "sides", label = T.sides, text = tostring(prefs.placeSides or 5), decimals = 0 }
+     :slider{ id = "rounding", label = T.rounding, min = 0, max = 100, value = prefs.placeRounding or 30 }
+     :check{ id = "square", label = "", text = T.sameSize, selected = prefs.placeSquare == true }
+     :button{ id = "ok", text = T.ok, focus = true }
+     :button{ id = "cancel", text = T.cancel }
+  update()
+  dlg:show()
+  if S ~= s or s.finished or not dlg.data.ok then return end
+  local d = dlg.data
+  local placing = { kind = kinds[d.kind] or "ellipse", rounding = d.rounding, square = d.square,
+                    sides = math.max(3, math.min(64, floor(tonumber(d.sides) or 5))) }
+  prefs.placeKind, prefs.placeSides = placing.kind, placing.sides
+  prefs.placeRounding, prefs.placeSquare = placing.rounding, placing.square
+  s.placing = placing
+  s.drawing, s.xf = false, nil
+  select(nil, nil)
+  syncFields()
+  refresh()
   askTimer:start()
 end
 
@@ -2268,13 +2434,14 @@ openPanel = function()
      :button{ id = "newLine", text = T.newShape,
               onclick = whenEditing(function(s)
                 -- Until drawing ends, clicks only draw the new line (other lines can't be grabbed)
-                s.xf = nil
+                s.xf, s.placing = nil, nil
                 s.drawing = true
                 select(nil, nil)
                 syncFields()
                 refresh()
                 askTimer:start()
               end) }
+     :button{ id = "place", text = T.place, onclick = whenEditing(placeShapeDialog) }
      :button{ id = "deleteLine", text = T.deleteShape, onclick = whenEditing(deleteSelectedShape) }
      :newrow()
      :button{ id = "copy", text = T.copy, onclick = whenEditing(copyShapes) }
@@ -2454,6 +2621,13 @@ local function onBeforeCommand(ev)
     ev.stopPropagation()
   elseif here and name == "Redo" and #s.redoStack > 0 then
     redo()
+    ev.stopPropagation()
+  elseif here and name == "PlayAnimation" and s.placing then
+    -- Enter stops placing a shape (instead of playing the animation)
+    s.placing = nil
+    syncFields()
+    refresh()
+    askTimer:start()
     ev.stopPropagation()
   elseif here and name == "PlayAnimation" and s.xf then
     -- Enter ends transforming (instead of playing the animation)
