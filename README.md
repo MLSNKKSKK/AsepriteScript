@@ -182,7 +182,7 @@ An extension that adds **curve layers**. Lines on a curve layer are drawn with B
 
 ### Usage
 
-Choose **Layer > New > New Curve Layer** (also in the right-click menu of the layers in the timeline). A layer named `Curve 1` is added right above the active layer.
+Choose **Layer > New > New Curve Layer** (also in the right-click menu of the layers in the timeline). A layer named `Curve 1` is added right above the active layer. Curve layers are shown in green in the timeline, so they're easy to tell apart (curve layers made with an earlier version get the color with their next edit; a layer color you picked yourself is kept).
 
 While a curve layer is selected, you edit its lines directly on the canvas, and a small panel opens at the right edge of the window. Zooming with the mouse wheel and scrolling with Space+drag work as usual.
 
@@ -224,10 +224,15 @@ Grayscale sprites can't show green, and neither can Indexed sprites whose palett
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
 | **Undo** / **Redo** | Undo / redo your changes to the lines. |
 | **Stop Editing** | Stops editing the layer so you can use Aseprite's tools on it (for example the Move tool). Closing the panel does the same. Selecting the layer again, or **Layer > Edit Curves**, starts editing again. |
+| **Rasterize** | Turns the curve layer into a normal layer (see below). |
 
 When a line is selected, the fields show its settings and changing them changes that line. When no line is selected, they are the settings for the next new line.
 
 Editing also pauses while the animation plays, and starts again when you stop it with Enter.
+
+### Rasterizing
+
+**Layer > Rasterize Curve Layer** (also in the timeline's right-click menu and the panel's **Rasterize** button) turns the curve layer into a normal layer. The pixels stay as they are, but the lines can no longer be edited as curves, and you can paint on the layer with Aseprite's tools. The cels are trimmed to their pixels and the green layer color is removed. **Edit > Undo** (Ctrl+Z) brings the curve layer back.
 
 ### Notes
 

@@ -17,6 +17,9 @@ local TEXT = {
     title = "Bezier Curve",
     newLayerCmd = "New Curve Layer",
     editCmd = "Edit Curves",
+    rasterizeCmd = "Rasterize Curve Layer",
+    rasterize = "Rasterize",
+    rasterizedTip = "The curve layer is now a normal layer. Edit > Undo brings the lines back.",
     layerName = "Curve",
     hint = "Bezier Curve: click to add points, drag points or handles to edit them",
     hintDrawing = "Bezier Curve: drawing a line (other lines can't be grabbed). Esc, Enter or click its last point: done",
@@ -58,6 +61,9 @@ local TEXT = {
     title = "ベジェ曲線",
     newLayerCmd = "新しい曲線レイヤー",
     editCmd = "曲線を編集",
+    rasterizeCmd = "曲線レイヤーをラスタライズ",
+    rasterize = "ラスタライズ",
+    rasterizedTip = "曲線レイヤーを普通のレイヤーにしました。編集 > 元に戻す で線のデータも戻せます。",
     layerName = "曲線",
     hint = "ベジェ曲線: クリックで点を追加、点やハンドルをドラッグで編集",
     hintDrawing = "ベジェ曲線: 線を描いています(ほかの線はつかめません)。Esc・Enter・最後の点をクリックで終了",
@@ -513,6 +519,21 @@ end
 local function isCurveLayer(layer)
   return layer ~= nil and layer.isImage and not layer.isTilemap
          and layer.properties(KEY).curve == true
+end
+
+-- Curve layers get this color in the timeline, so they're easy to tell apart
+local CURVE_COLOR = { r = 80, g = 200, b = 110 }
+
+local function isCurveColor(c)
+  return c ~= nil and c.alpha > 0
+         and c.red == CURVE_COLOR.r and c.green == CURVE_COLOR.g and c.blue == CURVE_COLOR.b
+end
+
+-- Gives a curve layer its color, unless the user already picked one
+local function colorCurveLayer(layer)
+  if layer.color.alpha == 0 then
+    layer.color = Color{ r = CURVE_COLOR.r, g = CURVE_COLOR.g, b = CURVE_COLOR.b }
+  end
 end
 
 local function coversCanvas(sprite, cel)
@@ -1380,6 +1401,7 @@ local function finishSession(canUndo)
       end
       if result ~= s.original then
         app.transaction(T.title, function()
+          pcall(colorCurveLayer, s.layer)   -- curve layers made before layers had a color
           local c = s.layer:cel(s.frameNumber)
           if #s.paths == 0 then
             if c then s.sprite:deleteCel(c) end
@@ -1526,6 +1548,8 @@ openPanel = function()
      :button{ id = "redo", text = T.redo, onclick = whenEditing(redo) }
      :separator{}
      :button{ id = "stop", text = T.stop, onclick = stopEditing }
+     :button{ id = "rasterize", text = T.rasterize,
+              onclick = function() app.command.BezierCurveRasterize() end }
   panel = dlg
   dlg:show{ wait = false }
 
@@ -1652,9 +1676,46 @@ local function newCurveLayer()
       layer.stackIndex = src.stackIndex + 1
     end
     layer.properties(KEY).curve = true
+    colorCurveLayer(layer)
     app.layer = layer
   end)
   paused = nil
+  scheduleTick()
+end
+
+-- Turns the active curve layer into a normal layer: the pixels stay, the
+-- curve data goes. Edit > Undo brings it back.
+local function rasterizeLayer()
+  local sprite, layer = app.sprite, app.layer
+  if not sprite or not isCurveLayer(layer) then
+    app.alert{ title = T.title, text = T.notCurveLayer }
+    return
+  end
+  if not layer.isEditable then
+    app.alert{ title = T.title, text = T.locked }
+    return
+  end
+  app.transaction(T.rasterizeCmd, function()
+    local cels = {}
+    for _, c in ipairs(layer.cels) do cels[#cels + 1] = c end
+    for _, c in ipairs(cels) do
+      c.properties(KEY, {})
+      -- Trim the canvas-sized cels to their pixels, like a normal layer
+      local img = c.image
+      local b = img:shrinkBounds()
+      if b.width <= 0 or b.height <= 0 then
+        sprite:deleteCel(c)
+      elseif b.width < img.width or b.height < img.height then
+        local pos = c.position
+        c.image = Image(img, b)
+        c.position = Point(pos.x + b.x, pos.y + b.y)
+      end
+    end
+    layer.properties(KEY, {})
+    if isCurveColor(layer.color) then layer.color = Color{ r = 0, g = 0, b = 0, a = 0 } end
+  end)
+  paused, lastSkip = nil, nil
+  tip(T.rasterizedTip)
   scheduleTick()
 end
 
@@ -1689,6 +1750,10 @@ function init(plugin)
                      onenabled = onCurveLayer, onclick = editCurves }
   plugin:newCommand{ id = "BezierCurveEditPopup", title = T.editCmd, group = "layer_popup_properties",
                      onenabled = onCurveLayer, onclick = editCurves }
+  plugin:newCommand{ id = "BezierCurveRasterize", title = T.rasterizeCmd, group = "layer_properties",
+                     onenabled = onCurveLayer, onclick = rasterizeLayer }
+  plugin:newCommand{ id = "BezierCurveRasterizePopup", title = T.rasterizeCmd, group = "layer_popup_properties",
+                     onenabled = onCurveLayer, onclick = rasterizeLayer }
 
   listeners = {
     app.events:on("beforecommand", onBeforeCommand),
