@@ -1547,8 +1547,26 @@ local function nearestOnSegment(a, b, x, y)
   return bestT, bestD
 end
 
--- Finds what's at the pixel (x, y): a handle, a point, or a line.
--- While a line is being drawn, only that line can be grabbed.
+-- Whether the pixel (x, y) is inside the fill of a line (nonzero winding
+-- rule; an open line is closed with a straight line, as when filling)
+local function insideFill(p, x, y)
+  if not p.fill or #p.nodes < 2 then return false end
+  local pts = flatten(p)
+  local n, winding = #pts, 0
+  for i = 1, n do
+    local a, b = pts[i], pts[i % n + 1]
+    local side = (b[1] - a[1]) * (y - a[2]) - (x - a[1]) * (b[2] - a[2])
+    if a[2] <= y then
+      if b[2] > y and side > 0 then winding = winding + 1 end
+    elseif b[2] <= y and side < 0 then
+      winding = winding - 1
+    end
+  end
+  return winding ~= 0
+end
+
+-- Finds what's at the pixel (x, y): a handle, a point, a line, or the fill
+-- of a shape. While a line is being drawn, only that line can be grabbed.
 local function hitTest(x, y)
   local s = S
   local tol = tolerance()
@@ -1602,7 +1620,13 @@ local function hitTest(x, y)
       end
     end
   end
-  return best
+  if best or s.drawing then return best end
+
+  -- Inside a fill: the shape on top
+  for pi = #s.paths, 1, -1 do
+    if insideFill(s.paths[pi], x, y) then return { kind = "fill", path = pi } end
+  end
+  return nil
 end
 
 -- Adds a point to the end of the selected line, or starts a new line
@@ -1698,8 +1722,8 @@ local function startGesture(x, y)
                 finishes = finishes }
   elseif hit then
     -- Clicking the line of the selected shape adds a point; clicking another
-    -- shape's line only selects it
-    local addsPoint = hit.path == s.active
+    -- shape's line, or inside a fill, only selects the shape. Dragging moves it.
+    local addsPoint = hit.kind == "segment" and hit.path == s.active
     select(hit.path, nil)
     local orig = {}
     for i, n in ipairs(s.paths[hit.path].nodes) do orig[i] = { n.x, n.y } end

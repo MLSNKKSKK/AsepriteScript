@@ -195,7 +195,8 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 | Drag a point | Moves the point. |
 | Drag a handle | Changes how the line bends. The handle on the other side turns with it, unless **Move one handle only** is checked. |
 | Click a line | Selects its shape. Clicking a line of the selected shape adds a point there without changing its form. |
-| Drag a line | Moves the whole shape. |
+| Click inside a filled shape | Selects the shape (the one on top where fills overlap). To start a new shape on top of a fill, press **New Shape** first. |
+| Drag a line, or inside a fill | Moves the whole shape. |
 | Click a point | Selects it (it gets a white outline). |
 | **Delete** / **Backspace** | Deletes the selected point. |
 | **Ctrl+Z** / **Ctrl+Y** | Undo / redo. Your recent changes to the lines are undone first, then Aseprite's own history. |
