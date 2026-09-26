@@ -46,6 +46,25 @@ local TEXT = {
     undo = "Undo",
     redo = "Redo",
     stop = "Stop Editing",
+    transformAll = "Transform (all lines)",
+    transformSelected = "Transform (selected line)",
+    transformBox = "Transform Box",
+    endTransform = "End Transform",
+    numeric = "Numeric...",
+    flipH = "Flip Horizontal",
+    flipV = "Flip Vertical",
+    rotateLeft = "Rotate Left 90°",
+    rotateRight = "Rotate Right 90°",
+    keepRatio = "Keep proportions (corner handles)",
+    hintScale = "Transform: drag the squares to scale, inside to move. Click inside: rotate/shear. Enter, Esc or click outside: done",
+    hintRotate = "Transform: drag the circles to rotate, the diamonds to shear, inside to move. Click inside: scale. Enter, Esc or click outside: done",
+    numericTitle = "Transform",
+    scaleX = "Width (%)",
+    scaleY = "Height (%)",
+    rotate = "Rotate (°, clockwise)",
+    shearX = "Shear horizontally (°)",
+    shearY = "Shear vertically (°)",
+    ok = "OK",
     notCurveLayer = "The active layer isn't a curve layer. Make one with Layer > New > New Curve Layer.",
     locked = "The curve layer is locked or hidden.",
     handEdited = { "The pixels in this frame were changed after the lines were drawn",
@@ -92,6 +111,25 @@ local TEXT = {
     undo = "元に戻す",
     redo = "やり直す",
     stop = "編集をやめる",
+    transformAll = "変形(すべての線)",
+    transformSelected = "変形(選択中の線)",
+    transformBox = "変形ボックス",
+    endTransform = "変形を終える",
+    numeric = "数値で変形...",
+    flipH = "左右反転",
+    flipV = "上下反転",
+    rotateLeft = "左に90°回転",
+    rotateRight = "右に90°回転",
+    keepRatio = "縦横比を保つ(角のハンドル)",
+    hintScale = "変形: 四角をドラッグで拡大縮小、内側をドラッグで移動。内側をクリックで回転・シアーに切り替え。Enter・Esc・外側をクリックで終了",
+    hintRotate = "変形: 丸をドラッグで回転、ひし形をドラッグでシアー、内側をドラッグで移動。内側をクリックで拡大縮小に切り替え。Enter・Esc・外側をクリックで終了",
+    numericTitle = "数値で変形",
+    scaleX = "横幅(%)",
+    scaleY = "高さ(%)",
+    rotate = "回転(°、時計回り)",
+    shearX = "横に傾ける(°)",
+    shearY = "縦に傾ける(°)",
+    ok = "OK",
     notCurveLayer = "選択中のレイヤーは曲線レイヤーではありません。レイヤー > 新規 > 新しい曲線レイヤー で作れます。",
     locked = "曲線レイヤーがロックされているか、非表示になっています。",
     handEdited = { "このフレームの絵は、線を引いたあとに変更されています",
@@ -945,6 +983,103 @@ local function toggleRound(p, i)
 end
 
 ------------------------------------------------------------------------
+-- Transforming lines (scale, rotate, shear, flip)
+--
+-- A transform moves every point and handle end of the lines with a
+-- function fn(x, y) -> x, y. Points land on whole pixels, handle ends keep
+-- their exact positions. Dragging always transforms the lines as they were
+-- when the drag started, so rounding doesn't add up.
+
+-- Copies of the points of the lines in `list` (indexes into `paths`)
+local function copyNodes(paths, list)
+  local orig = {}
+  for _, pi in ipairs(list) do
+    local c = {}
+    for i, n in ipairs(paths[pi].nodes) do
+      c[i] = { x = n.x, y = n.y, ix = n.ix, iy = n.iy, ox = n.ox, oy = n.oy }
+    end
+    orig[pi] = c
+  end
+  return orig
+end
+
+-- Sets the points of the lines to their copies moved by fn
+local function mapNodes(paths, orig, fn)
+  for pi, c in pairs(orig) do
+    local nodes = paths[pi].nodes
+    for i, o in ipairs(c) do
+      local n = nodes[i]
+      local x, y = fn(o.x, o.y)
+      n.x, n.y = round(x), round(y)
+      -- A point without a handle stays without it
+      if o.ix ~= 0 or o.iy ~= 0 then
+        local hx, hy = fn(o.x + o.ix, o.y + o.iy)
+        n.ix, n.iy = hx - n.x, hy - n.y
+      end
+      if o.ox ~= 0 or o.oy ~= 0 then
+        local hx, hy = fn(o.x + o.ox, o.y + o.oy)
+        n.ox, n.oy = hx - n.x, hy - n.y
+      end
+    end
+  end
+end
+
+-- The area the lines in `list` pass through (not counting their width)
+local function pathBounds(paths, list)
+  local x0, y0, x1, y1 = math.huge, math.huge, -math.huge, -math.huge
+  for _, pi in ipairs(list) do
+    for _, q in ipairs(flatten(paths[pi])) do
+      x0, x1 = math.min(x0, q[1]), math.max(x1, q[1])
+      y0, y1 = math.min(y0, q[2]), math.max(y1, q[2])
+    end
+  end
+  if x0 > x1 then return nil end
+  -- Points on the curve can be off by a hair (19.9999999 instead of 20)
+  local function snap(v)
+    local r = round(v)
+    return abs(v - r) < 1e-6 and r or v
+  end
+  return snap(x0), snap(y0), snap(x1), snap(y1)
+end
+
+-- The point the lines turn around: the middle of their area. It's moved
+-- by half a pixel if needed, so that turning by 90 degrees keeps the
+-- points on whole pixels.
+local function turnCenter(x0, y0, x1, y1)
+  local sx, sy = round(x0) + round(x1), round(y0) + round(y1)
+  if (sx + sy) % 2 == 0 then return sx / 2, sy / 2 end
+  return round(sx / 2), round(sy / 2)
+end
+
+-- Transforms that the panel buttons and the Edit menu use
+local function flipFn(vertical)
+  return function(x0, y0, x1, y1)
+    local cx, cy = round(x0) + round(x1), round(y0) + round(y1)
+    if vertical then return function(x, y) return x, cy - y end end
+    return function(x, y) return cx - x, y end
+  end
+end
+
+-- Turns by a multiple of 90 degrees (clockwise on the screen)
+local function rotateFn(quarters)
+  quarters = quarters % 4
+  return function(x0, y0, x1, y1)
+    local cx, cy = turnCenter(x0, y0, x1, y1)
+    if quarters == 2 then
+      -- Half a turn keeps the points on whole pixels around the exact middle
+      cx, cy = (round(x0) + round(x1)) / 2, (round(y0) + round(y1)) / 2
+    end
+    return function(x, y)
+      local ux, uy = x - cx, y - cy
+      if quarters == 1 then ux, uy = -uy, ux
+      elseif quarters == 2 then ux, uy = -ux, -uy
+      elseif quarters == 3 then ux, uy = uy, -ux end
+      return cx + ux, cy + uy
+    end
+  end
+end
+
+------------------------------------------------------------------------
 -- Panel fields
 
 local function syncFields()
@@ -968,6 +1103,9 @@ local function syncFields()
     dlg:modify{ id = "closed", selected = false }
     dlg:modify{ id = "styleSep", text = s.drawing and T.drawingLine or T.nextLine }
   end
+  -- Transforms work on the selected line, or on all lines when none is selected
+  dlg:modify{ id = "xfSep", text = p and T.transformSelected or T.transformAll }
+  dlg:modify{ id = "transform", text = s.xf and T.endTransform or T.transformBox }
   s.syncing = false
 end
 
@@ -986,6 +1124,9 @@ local function updateButtons()
   dlg:modify{ id = "roundSharp", enabled = hasPoint }
   dlg:modify{ id = "undo", enabled = #s.undoStack > 0 }
   dlg:modify{ id = "redo", enabled = #s.redoStack > 0 }
+  for _, id in ipairs({ "transform", "numeric", "flipH", "flipV", "rotateLeft", "rotateRight" }) do
+    dlg:modify{ id = id, enabled = #s.paths > 0 or (id == "transform" and s.xf ~= nil) }
+  end
 end
 
 local function select(pi, ni)
@@ -1008,6 +1149,55 @@ local function deleteNode(pi, ni)
     end
   elseif s.active == pi and s.selNode then
     if s.selNode == ni then s.selNode = nil elseif s.selNode > ni then s.selNode = s.selNode - 1 end
+  end
+end
+
+------------------------------------------------------------------------
+-- The transform box
+
+-- The lines a transform works on: the selected line, or all lines
+local function xfTargets()
+  local s = S
+  if s.paths[s.active] then return { s.active } end
+  local list = {}
+  for i = 1, #s.paths do list[i] = i end
+  return list
+end
+
+-- The box around the lines being transformed, with its handles. The box is
+-- drawn a little outside the lines (and inside the canvas).
+local function xfBox()
+  local s = S
+  local list = xfTargets()
+  local x0, y0, x1, y1 = pathBounds(s.paths, list)
+  if not x0 then return nil end
+  local pad = 2
+  for _, pi in ipairs(list) do
+    local p = s.paths[pi]
+    if p.stroke ~= false then pad = math.max(pad, p.width // 2 + 2) end
+  end
+  local W, H = s.sprite.width, s.sprite.height
+  local function clamp(v, hi) return math.max(0, math.min(hi, v)) end
+  local ex0, ex1 = clamp(floor(x0) - pad, W - 1), clamp(math.ceil(x1) + pad, W - 1)
+  local ey0, ey1 = clamp(floor(y0) - pad, H - 1), clamp(math.ceil(y1) + pad, H - 1)
+  local mx, my = (ex0 + ex1) // 2, (ey0 + ey1) // 2
+  return {
+    x0 = x0, y0 = y0, x1 = x1, y1 = y1, ex0 = ex0, ey0 = ey0, ex1 = ex1, ey1 = ey1,
+    -- Corners first: they win when handles overlap
+    handles = { { "nw", ex0, ey0 }, { "ne", ex1, ey0 }, { "sw", ex0, ey1 }, { "se", ex1, ey1 },
+                { "n", mx, ey0 }, { "s", mx, ey1 }, { "w", ex0, my }, { "e", ex1, my } },
+  }
+end
+
+-- Pixels of the handle shapes, around their center
+local CIRCLE, DIAMOND, RING, PLUS = {}, {}, {}, {}
+for dy = -2, 2 do
+  for dx = -2, 2 do
+    local m, c = abs(dx) + abs(dy), math.max(abs(dx), abs(dy))
+    if c == 2 and m < 4 then CIRCLE[#CIRCLE + 1] = { dx, dy } end
+    if m == 2 then DIAMOND[#DIAMOND + 1] = { dx, dy } end
+    if c == 1 then RING[#RING + 1] = { dx, dy } end
+    if m == 1 then PLUS[#PLUS + 1] = { dx, dy } end
   end
 end
 
@@ -1045,6 +1235,44 @@ local function addGuides(want)
       for dx = -1, 1 do put(x + dx, y + dy, (dx == 0 and dy == 0) and (center or ring) or ring) end
     end
   end
+  -- Transforming: only the box and its handles
+  if s.xf then
+    local b = xfBox()
+    if not b then return end
+    local function dot(x, y, j)
+      if j % 2 == 0 then
+        if g.twoTone then put(x, y, j % 4 == 0 and g.dark or g.light) else put(x, y, g.handle) end
+      end
+    end
+    for x = b.ex0, b.ex1 do dot(x, b.ey0, x - b.ex0); dot(x, b.ey1, x - b.ex0) end
+    for y = b.ey0, b.ey1 do dot(b.ex0, y, y - b.ey0); dot(b.ex1, y, y - b.ey0) end
+    local outer, inner = g.point, nil
+    if g.twoTone then outer, inner = g.dark, g.light end
+    local function shape(x, y, pixels, fill)
+      for _, o in ipairs(pixels) do put(x + o[1], y + o[2], outer) end
+      if inner then for _, o in ipairs(fill) do put(x + o[1], y + o[2], inner) end end
+    end
+    local rotating = s.xf.mode == "rotate"
+    for _, h in ipairs(b.handles) do
+      local x, y = h[2], h[3]
+      if not rotating then
+        square(x, y, outer, inner)            -- squares: scale
+      elseif #h[1] == 2 then
+        shape(x, y, CIRCLE, RING)             -- circles at the corners: rotate
+      else
+        shape(x, y, DIAMOND, PLUS)            -- diamonds on the sides: shear
+      end
+    end
+    if rotating then
+      -- The point the lines turn around
+      local cx, cy = turnCenter(b.x0, b.y0, b.x1, b.y1)
+      cx, cy = floor(cx), floor(cy)
+      for _, o in ipairs(PLUS) do put(cx + o[1], cy + o[2], outer) end
+      put(cx, cy, inner or outer)
+    end
+    return
+  end
+
   -- Black or white, whichever stands out from what's under (x, y)
   local function contrasting(x, y)
     local luma, alpha = 170, 0   -- the transparent checkerboard is light
@@ -1348,6 +1576,24 @@ local function startGesture(x, y)
   local s = S
   s.lastMerge = nil
   local before = snapshot()
+  if s.xf then
+    -- A handle of the box, inside the box (move), or outside (done)
+    local b = xfBox()
+    local press = { kind = "xfOut", before = before, sx = x, sy = y, box = b, mode = s.xf.mode,
+                    orig = copyNodes(s.paths, xfTargets()) }
+    if b then
+      local bestD = math.max(tolerance(), 2.5) + 0.001
+      for _, h in ipairs(b.handles) do
+        local d = dist(x, y, h[2], h[3])
+        if d < bestD then press.kind, press.handle, bestD = "xfHandle", h[1], d end
+      end
+      if press.kind == "xfOut" and x >= b.ex0 and x <= b.ex1 and y >= b.ey0 and y <= b.ey1 then
+        press.kind = "xfMove"
+      end
+    end
+    s.press = press
+    return
+  end
   local hit = hitTest(x, y)
   if hit and hit.kind == "handle" then
     select(hit.path, hit.node)
@@ -1370,9 +1616,66 @@ local function startGesture(x, y)
   end
 end
 
+-- The transform for dragging a handle of the box from where the drag
+-- started to (x, y), or nil to leave the lines alone
+local function handleTransform(d, x, y)
+  local b, h = d.box, d.handle
+  local dx, dy = x - d.sx, y - d.sy
+  if d.mode == "rotate" and #h == 2 then
+    -- Rotate around the center, snapping to multiples of 15 degrees
+    local cx, cy = turnCenter(b.x0, b.y0, b.x1, b.y1)
+    local a = math.atan(y - cy, x - cx) - math.atan(d.sy - cy, d.sx - cx)
+    local deg = math.deg(a)
+    local snap = round(deg / 15) * 15
+    if abs(deg - snap) < 2 then a = math.rad(snap) end
+    local c, sn = math.cos(a), math.sin(a)
+    return function(px, py)
+      local ux, uy = px - cx, py - cy
+      return cx + ux * c - uy * sn, cy + ux * sn + uy * c
+    end
+  elseif d.mode == "rotate" then
+    -- Shear: the dragged side slides along, the opposite side stays
+    if h == "n" or h == "s" then
+      local ay = h == "n" and b.y1 or b.y0
+      local span = (h == "n" and b.y0 or b.y1) - ay
+      if span == 0 then return nil end
+      local k = dx / span
+      return function(px, py) return px + k * (py - ay), py end
+    end
+    local ax = h == "w" and b.x1 or b.x0
+    local span = (h == "w" and b.x0 or b.x1) - ax
+    if span == 0 then return nil end
+    local k = dy / span
+    return function(px, py) return px, py + k * (px - ax) end
+  end
+  -- Scale: the dragged side (or corner) moves, the opposite one stays
+  local w, ht = b.x1 - b.x0, b.y1 - b.y0
+  local sx, sy, ax, ay = 1, 1, b.x0, b.y0
+  if h:find("e") then ax = b.x0; if w > 0 then sx = (w + dx) / w end
+  elseif h:find("w") then ax = b.x1; if w > 0 then sx = (w - dx) / w end end
+  if h:find("s") then ay = b.y0; if ht > 0 then sy = (ht + dy) / ht end
+  elseif h:find("n") then ay = b.y1; if ht > 0 then sy = (ht - dy) / ht end end
+  if #h == 2 and panel and panel.data.keepRatio then
+    local k = abs(sx - 1) >= abs(sy - 1) and sx or sy
+    sx, sy = k, k
+  end
+  return function(px, py) return ax + (px - ax) * sx, ay + (py - ay) * sy end
+end
+
 local function dragTo(x, y)
   local s = S
   local d = s.press
+  if d.kind == "xfHandle" then
+    mapNodes(s.paths, d.orig, handleTransform(d, x, y) or function(px, py) return px, py end)
+    return
+  elseif d.kind == "xfMove" then
+    local dx, dy = x - d.sx, y - d.sy
+    if dx ~= 0 or dy ~= 0 then d.moved = true end
+    mapNodes(s.paths, d.orig, function(px, py) return px + dx, py + dy end)
+    return
+  elseif d.kind == "xfOut" then
+    return
+  end
   local n = d.hit.node and s.paths[d.hit.path].nodes[d.hit.node]
   if d.kind == "anchor" then
     n.x, n.y = d.x + x - d.sx, d.y + y - d.sy
@@ -1402,6 +1705,15 @@ local function endGesture(x, y, dragged)
   s.press = nil
   if d.kind == "segment" and not d.moved then
     select(d.hit.path, insertNode(s.paths[d.hit.path], d.hit.seg, d.hit.t))
+  end
+  local clicked = x == d.sx and y == d.sy
+  if d.kind == "xfMove" and not d.moved and s.xf then
+    -- A click inside the box switches between scaling and rotating/shearing
+    s.xf.mode = s.xf.mode == "rotate" and "scale" or "rotate"
+  elseif d.kind == "xfOut" and clicked then
+    -- A click outside the box ends transforming
+    s.xf = nil
+    syncFields()
   end
   pushUndo(d.before)
   if d.finishes and x == d.sx and y == d.sy then
@@ -1444,6 +1756,10 @@ local function onCancel()
     local before = s.press.before
     s.press = nil
     restore(before)
+  elseif s.xf then
+    s.xf = nil
+    syncFields()
+    refresh()
   elseif s.active or s.drawing then
     endDrawing()
   end
@@ -1456,7 +1772,12 @@ local function ask()
   local p = s.paths[s.active]
   local n = p and s.selNode and p.nodes[s.selNode]
   -- `point` outlines the selected point
-  s.editor:askPoint{ title = s.drawing and T.hintDrawing or T.hint, point = n and Point(n.x, n.y) or nil,
+  local title = s.drawing and T.hintDrawing or T.hint
+  if s.xf then
+    title = s.xf.mode == "rotate" and T.hintRotate or T.hintScale
+    n = nil
+  end
+  s.editor:askPoint{ title = title, point = n and Point(n.x, n.y) or nil,
                      onchange = onChange, onclick = onClick, oncancel = onCancel }
 end
 
@@ -1626,6 +1947,83 @@ local function stopEditing()
 end
 
 ------------------------------------------------------------------------
+-- Transform actions
+
+-- Turns the transform box on or off
+local function toggleTransform(s)
+  if s.xf then
+    s.xf = nil
+  elseif #s.paths > 0 then
+    s.drawing = false
+    s.selNode = nil
+    s.xf = { mode = "scale" }
+  end
+  syncFields()
+  refresh()
+  askTimer:start()
+end
+
+-- Transforms the lines (see xfTargets) as one step. makeFn(x0, y0, x1, y1)
+-- gets the area of the lines and returns the transform.
+local function transformLines(s, makeFn)
+  local list = xfTargets()
+  local x0, y0, x1, y1 = pathBounds(s.paths, list)
+  if not x0 then return end
+  local orig = copyNodes(s.paths, list)
+  edit(function() mapNodes(s.paths, orig, makeFn(x0, y0, x1, y1)) end)
+  askTimer:start()
+end
+
+-- Asks for exact values, showing the result while they're typed
+local function numericTransform(s)
+  local list = xfTargets()
+  local x0, y0, x1, y1 = pathBounds(s.paths, list)
+  if not x0 then return end
+  local cx, cy = turnCenter(x0, y0, x1, y1)
+  local before = snapshot()
+  local orig = copyNodes(s.paths, list)
+  local dlg
+  local function apply()
+    if S ~= s or s.finished then return end
+    local d = dlg.data
+    local function angle(v) return math.rad(math.max(-89, math.min(89, v or 0))) end
+    local sx, sy = (d.scaleX or 100) / 100, (d.scaleY or 100) / 100
+    local tx, ty = math.tan(angle(d.shearX)), math.tan(angle(d.shearY))
+    local a = math.rad(d.rotate or 0)
+    local c, sn = math.cos(a), math.sin(a)
+    -- Scale, then shear (positive: the top moves right, the right side moves
+    -- down), then rotate, all around the center
+    mapNodes(s.paths, orig, function(px, py)
+      local ux, uy = (px - cx) * sx, (py - cy) * sy
+      ux = ux - tx * uy
+      uy = uy + ty * ux
+      return cx + ux * c - uy * sn, cy + ux * sn + uy * c
+    end)
+    redraw()
+    app.refresh()
+  end
+  dlg = Dialog{ title = T.numericTitle }
+  dlg:number{ id = "scaleX", label = T.scaleX, text = "100", decimals = 1, onchange = apply }
+     :number{ id = "scaleY", label = T.scaleY, text = "100", decimals = 1, onchange = apply }
+     :number{ id = "rotate", label = T.rotate, text = "0", decimals = 1, onchange = apply }
+     :number{ id = "shearX", label = T.shearX, text = "0", decimals = 1, onchange = apply }
+     :number{ id = "shearY", label = T.shearY, text = "0", decimals = 1, onchange = apply }
+     :button{ id = "ok", text = T.ok, focus = true }
+     :button{ id = "cancel", text = T.cancel }
+  dlg:show()
+  if S ~= s or s.finished then return end
+  if dlg.data.ok then
+    apply()
+    s.lastMerge = nil
+    pushUndo(before)
+    refresh()
+    askTimer:start()
+  else
+    restore(before)
+  end
+end
+
+------------------------------------------------------------------------
 -- Panel
 
 local function changeStyle(key, apply)
@@ -1700,6 +2098,7 @@ openPanel = function()
      :button{ id = "newLine", text = T.newLine,
               onclick = whenEditing(function(s)
                 -- Until drawing ends, clicks only draw the new line (other lines can't be grabbed)
+                s.xf = nil
                 s.drawing = true
                 select(nil, nil)
                 syncFields()
@@ -1713,6 +2112,7 @@ openPanel = function()
                 edit(function()
                   table.remove(s.paths, pi)
                   s.drawing = false
+                  s.xf = nil
                   select(nil, nil)
                 end)
                 syncFields()
@@ -1729,6 +2129,22 @@ openPanel = function()
      :newrow()
      :button{ id = "undo", text = T.undo, onclick = whenEditing(undo) }
      :button{ id = "redo", text = T.redo, onclick = whenEditing(redo) }
+     :separator{ id = "xfSep", text = T.transformAll }
+     :button{ id = "transform", text = T.transformBox, onclick = whenEditing(toggleTransform) }
+     :button{ id = "numeric", text = T.numeric, onclick = whenEditing(numericTransform) }
+     :newrow()
+     :button{ id = "flipH", text = T.flipH,
+              onclick = whenEditing(function(s) transformLines(s, flipFn(false)) end) }
+     :button{ id = "flipV", text = T.flipV,
+              onclick = whenEditing(function(s) transformLines(s, flipFn(true)) end) }
+     :newrow()
+     :button{ id = "rotateLeft", text = T.rotateLeft,
+              onclick = whenEditing(function(s) transformLines(s, rotateFn(-1)) end) }
+     :button{ id = "rotateRight", text = T.rotateRight,
+              onclick = whenEditing(function(s) transformLines(s, rotateFn(1)) end) }
+     :newrow()
+     :check{ id = "keepRatio", text = T.keepRatio, selected = prefs.keepRatio == true,
+             onclick = function() prefs.keepRatio = dlg.data.keepRatio end }
      :separator{}
      :button{ id = "stop", text = T.stop, onclick = stopEditing }
      :button{ id = "rasterize", text = T.rasterize,
@@ -1827,9 +2243,26 @@ local function onBeforeCommand(ev)
   elseif here and name == "Redo" and #s.redoStack > 0 then
     redo()
     ev.stopPropagation()
+  elseif here and name == "PlayAnimation" and s.xf then
+    -- Enter ends transforming (instead of playing the animation)
+    toggleTransform(s)
+    ev.stopPropagation()
   elseif here and name == "PlayAnimation" and s.drawing then
     -- Enter ends drawing the line (instead of playing the animation)
     endDrawing()
+    ev.stopPropagation()
+  elseif here and name == "MaskContent" then
+    -- Edit > Transform (Ctrl+T) shows the transform box
+    if not s.xf then toggleTransform(s) end
+    ev.stopPropagation()
+  elseif here and (name == "Flip" or name == "Rotate") and ev.params and ev.params.target == "mask" then
+    -- Edit > Flip (Shift+H, Shift+V) and Edit > Rotate turn the lines
+    -- instead of the pixels
+    if name == "Flip" then
+      transformLines(s, flipFn(ev.params.orientation == "vertical"))
+    else
+      transformLines(s, rotateFn((tonumber(ev.params.angle) or 0) // 90))
+    end
     ev.stopPropagation()
   elseif here and name == "Clear" then
     -- Delete/Backspace deletes the selected point instead of clearing pixels

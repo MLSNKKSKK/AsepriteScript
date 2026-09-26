@@ -177,6 +177,7 @@ An extension that adds **curve layers**. Lines on a curve layer are drawn with B
 - Several lines per layer, each with its own color and width (1–32 px, round brush)
 - Pixel-perfect option for clean 1px lines, or antialiasing for smooth edges (RGB and Grayscale)
 - Closed shapes (connect the last point to the first), and filling the inside with a color, with or without the line
+- Transform lines: scale, rotate, shear, flip and move them with a box on the canvas, or type exact values
 - Each frame has its own lines
 - Works with RGB, Grayscale and Indexed sprites
 
@@ -224,12 +225,29 @@ Grayscale sprites can't show green, and neither can Indexed sprites whose palett
 | **Delete Line** / **Delete Point** | Deletes the selected line / point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
 | **Undo** / **Redo** | Undo / redo your changes to the lines. |
+| **Transform Box**, **Numeric...**, **Flip**, **Rotate**, **Keep proportions** | Transform the lines (see below). |
 | **Stop Editing** | Stops editing the layer so you can use Aseprite's tools on it (for example the Move tool). Closing the panel does the same. Selecting the layer again, or **Layer > Edit Curves**, starts editing again. |
 | **Rasterize** | Turns the curve layer into a normal layer (see below). |
 
 When a line is selected, the fields show its settings and changing them changes that line. When no line is selected, they are the settings for the next new line.
 
 Editing also pauses while the animation plays, and starts again when you stop it with Enter.
+
+### Transforming lines
+
+Transforms work on the selected line, or on all the lines of the frame when no line is selected (the panel says which). Each one is a single undo step. Points stay on whole pixels, and the handles turn and stretch with the line.
+
+- **Transform Box** (or **Edit > Transform**, Ctrl+T) puts a box around the lines. It has two modes; click inside the box to switch between them:
+
+  | Mode | Handles | Drag them to |
+  | --- | --- | --- |
+  | Scale | Squares at the corners and sides | Scale. The opposite side stays in place. Dragging past it flips the lines. With **Keep proportions** checked, the corners keep the width and height in proportion. |
+  | Rotate/shear | Circles at the corners | Rotate around the middle (marked with a small cross). The angle snaps to multiples of 15° when it's close. |
+  | | Diamonds on the sides | Shear: the side slides along, the opposite side stays. |
+
+  Drag inside the box to move the lines. Enter, Esc, a click outside the box or **End Transform** finishes.
+- **Numeric...** asks for the width and height (%), a rotation (degrees, clockwise) and a horizontal and vertical shear (degrees), and shows the result while you type. Everything happens around the middle of the lines.
+- **Flip Horizontal** / **Flip Vertical** and **Rotate Left 90°** / **Rotate Right 90°** work right away. Aseprite's own **Edit > Flip Horizontal** / **Flip Vertical** (Shift+H / Shift+V) and **Edit > Rotate** do the same while a curve layer is being edited. (**Sprite > Rotate Canvas** and **Sprite > Flip Canvas Horizontal** / **Vertical** still work on the pixels of the whole sprite.)
 
 ### Rasterizing
 
