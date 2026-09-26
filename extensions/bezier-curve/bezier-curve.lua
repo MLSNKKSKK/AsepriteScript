@@ -46,6 +46,10 @@ local TEXT = {
     newShape = "New Shape",
     duplicate = "Duplicate",
     deleteShape = "Delete Shape",
+    copy = "Copy",
+    paste = "Paste",
+    copiedOne = "Copied 1 shape. Paste it in any frame, layer or sprite.",
+    copiedMany = "Copied %d shapes. Paste them in any frame, layer or sprite.",
     deletePoint = "Delete Point",
     roundSharp = "Round/Sharp",
     undo = "Undo",
@@ -114,6 +118,10 @@ local TEXT = {
     newShape = "新しい図形",
     duplicate = "図形を複製",
     deleteShape = "図形を削除",
+    copy = "コピー",
+    paste = "貼り付け",
+    copiedOne = "図形を1個コピーしました。ほかのフレーム・レイヤー・スプライトにも貼り付けられます。",
+    copiedMany = "図形を%d個コピーしました。ほかのフレーム・レイヤー・スプライトにも貼り付けられます。",
     deletePoint = "点を削除",
     roundSharp = "丸/角",
     undo = "元に戻す",
@@ -868,6 +876,7 @@ local rerunning = false -- true while running the held command
 local removals = {}    -- event listeners to remove on the next tick
 local listeners = {}   -- app event listeners of the extension
 local lastSkip = nil   -- the last frame that couldn't be edited (to show the tip once)
+local clipboard = nil  -- shapes copied with the Copy button (serialized)
 local prefs = {}       -- plugin.preferences
 local askTimer, tickTimer
 
@@ -1149,6 +1158,8 @@ local function updateButtons()
   dlg:modify{ id = "pixelPerfect", enabled = indexed or not dlg.data.antialias }
   dlg:modify{ id = "closed", enabled = p ~= nil }
   dlg:modify{ id = "duplicate", enabled = p ~= nil }
+  dlg:modify{ id = "copy", enabled = #s.paths > 0 }
+  dlg:modify{ id = "paste", enabled = clipboard ~= nil }
   dlg:modify{ id = "deleteLine", enabled = p ~= nil }
   dlg:modify{ id = "deletePoint", enabled = hasPoint }
   dlg:modify{ id = "roundSharp", enabled = hasPoint }
@@ -2092,6 +2103,30 @@ local function duplicateShape(s)
   askTimer:start()
 end
 
+-- Copies the selected line, or all lines when none is selected
+local function copyShapes(s)
+  local list = {}
+  for _, pi in ipairs(xfTargets()) do list[#list + 1] = s.paths[pi] end
+  if #list == 0 then return end
+  clipboard = serialize(list)
+  tip(#list == 1 and T.copiedOne or string.format(T.copiedMany, #list))
+  updateButtons()
+end
+
+-- Adds the copied lines where they were, on top of the others. A single
+-- pasted line gets selected.
+local function pasteShapes(s)
+  local list = clipboard and parse(clipboard) or {}
+  if #list == 0 then return end
+  edit(function()
+    for _, p in ipairs(list) do s.paths[#s.paths + 1] = p end
+    s.drawing = false
+    if #list == 1 then select(#s.paths, nil) else select(nil, nil) end
+  end)
+  syncFields()
+  askTimer:start()
+end
+
 -- Asks for exact values, showing the result while they're typed
 local function numericTransform(s)
   local list = xfTargets()
@@ -2245,6 +2280,9 @@ openPanel = function()
                 syncFields()
                 askTimer:start()
               end) }
+     :newrow()
+     :button{ id = "copy", text = T.copy, onclick = whenEditing(copyShapes) }
+     :button{ id = "paste", text = T.paste, onclick = whenEditing(pasteShapes) }
      :newrow()
      :button{ id = "deletePoint", text = T.deletePoint, onclick = whenEditing(deleteSelectedPoint) }
      :button{ id = "roundSharp", text = T.roundSharp,
