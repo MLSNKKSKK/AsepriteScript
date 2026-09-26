@@ -1709,12 +1709,6 @@ local function startGesture(x, y)
     return
   end
   local hit = hitTest(x, y)
-  -- While drawing, a drag inside the fill of the shape being drawn moves it
-  -- (a click there still adds a point)
-  local p = s.paths[s.active]
-  if not hit and s.drawing and p and insideFill(p, x, y) then
-    hit = { kind = "fill", path = s.active, clickAdds = true }
-  end
   if hit and hit.kind == "handle" then
     select(hit.path, hit.node)
     local hx, hy = handlePos(s.paths[hit.path].nodes[hit.node], hit.side)
@@ -1734,7 +1728,7 @@ local function startGesture(x, y)
     local orig = {}
     for i, n in ipairs(s.paths[hit.path].nodes) do orig[i] = { n.x, n.y } end
     s.press = { kind = "segment", hit = hit, before = before, sx = x, sy = y, orig = orig,
-                pivot = s.paths[hit.path].pivot, addsPoint = addsPoint, clickAdds = hit.clickAdds }
+                pivot = s.paths[hit.path].pivot, addsPoint = addsPoint }
   else
     s.press = { kind = "pull", hit = addPoint(x, y), before = before }
   end
@@ -1837,8 +1831,6 @@ local function endGesture(x, y, dragged)
   s.press = nil
   if d.kind == "segment" and not d.moved and d.addsPoint then
     select(d.hit.path, insertNode(s.paths[d.hit.path], d.hit.seg, d.hit.t))
-  elseif d.kind == "segment" and not d.moved and d.clickAdds then
-    addPoint(x, y)
   end
   local clicked = x == d.sx and y == d.sy
   if d.kind == "xfMove" and not d.moved and s.xf then

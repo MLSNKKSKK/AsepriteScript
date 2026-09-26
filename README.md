@@ -202,7 +202,7 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 | **Ctrl+Z** / **Ctrl+Y** | Undo / redo. Your recent changes to the lines are undone first, then Aseprite's own history. |
 | **Esc** | Cancels the drag in progress, or finishes / deselects the shape. |
 
-While you're drawing a shape, clicks only add to that shape: other shapes can't be grabbed, so you can start on another shape's point or cross over its line. Dragging inside the fill of the shape you're drawing moves it. After you finish the shape, clicking another shape's line selects it for editing.
+While you're drawing a shape, clicks only add to that shape: other shapes can't be grabbed, so you can start on another shape's point or cross over its line. Inside fills, clicks and drags add points too (a drag pulls out a curved point). After you finish the shape, clicking another shape's line selects it for editing.
 
 There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
 
