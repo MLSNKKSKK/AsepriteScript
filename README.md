@@ -202,7 +202,7 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 | **Ctrl+Z** / **Ctrl+Y** | Undo / redo. Your recent changes to the lines are undone first, then Aseprite's own history. |
 | **Esc** | Cancels the drag in progress, or finishes / deselects the shape. |
 
-While you're drawing a shape, clicks only add to that shape: other shapes can't be grabbed, so you can start on another shape's point or cross over its line. After you finish the shape, clicking another shape's line selects it for editing.
+While you're drawing a shape, clicks only add to that shape: other shapes can't be grabbed, so you can start on another shape's point or cross over its line. Dragging inside the fill of the shape you're drawing moves it. After you finish the shape, clicking another shape's line selects it for editing.
 
 There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
 
@@ -226,7 +226,7 @@ At the top of the panel, below a short help text, are the buttons for new shapes
 | **Fill**: **Color** | The fill color. |
 | **Move one handle only** | Dragging a handle doesn't turn the one on the other side, so you can make sharp corners. |
 | **Show guides** | Shows or hides the points and handles, to check how the shapes really look. |
-| **Connect the ends** | Joins the last point of the selected shape back to the first. |
+| **Connect the ends** | Joins the last point of the selected shape back to the first. Connecting the ends of the shape you're drawing also finishes it (it stays selected). |
 | **Delete Point** | Deletes the selected point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
 | **Transform Box**, **Numeric...**, **Flip**, **Rotate**, **Keep proportions** | Transform the shapes (see below). |
