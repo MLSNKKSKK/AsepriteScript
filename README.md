@@ -10,6 +10,7 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
 | [Import GIF as Layer](#import-gif-as-layer) | Imports a GIF animation into the open sprite as a layer. |
 | [Replace Color in All Layers](#replace-color-in-all-layers) | Replaces one color with another in every layer and frame at once. |
 | [Create Effect Layer](#create-effect-layer) | Adds a color layer shaped like the active layer, with a blend mode such as Multiply. |
+| [Bezier Curve](#bezier-curve) | Draws lines with Bezier curves that you can edit again later. |
 
 ## Installation
 
@@ -18,6 +19,7 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
    - [`Import GIF as Layer.lua`](Import%20GIF%20as%20Layer.lua)
    - [`Replace Color in All Layers.lua`](Replace%20Color%20in%20All%20Layers.lua)
    - [`Create Effect Layer.lua`](Create%20Effect%20Layer.lua)
+   - [`Bezier Curve.lua`](Bezier%20Curve.lua)
 
    To get them all at once, use **Code > Download ZIP** on this page.
 2. In Aseprite, choose **File > Scripts > Open Scripts Folder**.
@@ -161,9 +163,71 @@ The effect layer is a copy made at that moment: if you edit the original layer l
 
 When run without the UI, the script uses the foreground color, Multiply and full opacity.
 
+## Bezier Curve
+
+Draws lines with Bezier curves on a separate "curve layer". The lines stay editable: run the script again later to move the points, change how the lines bend, or change their color and width.
+
+- Place points and drag handles in an editor window, like the Pen tool in drawing apps
+- Several lines per layer, each with its own color and width (1–32 px, round brush)
+- Pixel-perfect option for clean 1px lines
+- Closed shapes (connect the last point to the first)
+- Each frame has its own lines
+- Works with RGB, Grayscale and Indexed sprites
+- Applying is a single undo step (**Edit > Undo** / Ctrl+Z)
+
+### Usage
+
+Select the layer you want the lines to go above, then run **File > Scripts > Bezier Curve**. An editor window opens with the current frame in it. Points are shown as squares and handles as diamonds.
+
+| Mouse / key | What it does |
+| --- | --- |
+| Click an empty spot | Adds a point to the end of the selected line, or starts a new line if none is selected. Drag before releasing to pull out handles and bend the line. |
+| Drag a point | Moves the point. |
+| Drag a handle | Changes how the line bends. The handle on the other side turns with it; hold **Alt** to move just this one. |
+| Click a line | Adds a point there without changing the shape. |
+| Drag a line | Moves the whole line. |
+| Right-click a point | Deletes the point. |
+| Right-click a handle | Removes the handle (that side of the point becomes straight). |
+| Double-click a point | Switches the point between round and sharp. |
+| **Alt**+drag a point | Pulls new handles out of the point. |
+| **Shift** while dragging | Moves points only horizontally or vertically, and snaps handles to 45° steps. |
+| Arrow keys | Move the selected point by 1 pixel. |
+| **Delete** | Deletes the selected point. |
+| **Ctrl+Z** / **Ctrl+Y** | Undo / redo inside the editor. |
+| **Esc** | Deselects the line. Press it again to close the window without applying. |
+| Mouse wheel | Zooms in and out. |
+| Middle-drag or **Space**+drag | Scrolls the view. |
+
+The bar at the bottom of the editor shows what a click or drag will do at the mouse position, the pixel under the mouse and the zoom level.
+
+| Field | Description |
+| --- | --- |
+| **Color** | The line color. Starts as the current foreground color. |
+| **Width** | The line width in pixels (1–32). |
+| **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines. |
+| **Connect the ends** | Joins the last point of the selected line back to the first. |
+| **New Line** | Deselects the line, so the next click starts a new one. |
+| **Delete Line** | Deletes the selected line. |
+| **Undo** | Undoes the last change in the editor. |
+| **Fit** | Zooms to show the whole sprite. |
+
+When a line is selected, the fields show its settings and changing them changes that line. When no line is selected, they are the settings for the next new line.
+
+Click **Apply**. The first time, a new layer named `Curve 1` is created right above the active layer.
+
+### Editing the lines later
+
+Select the curve layer, go to the frame you want to change and run **Bezier Curve** again. The lines of that frame open in the editor.
+
+- The lines are saved in the cel, so they're kept in `.aseprite` files. Other formats such as PNG only keep the pixels.
+- If you move the curve layer with the Move tool, the lines move with it.
+- New frames and copied cels keep their lines, so you can copy a frame and adjust the lines for the next pose. Linked cels share the same lines.
+- Anything painted by hand on the curve layer is lost when you apply an edit, because the frame is redrawn from the lines (the script warns you first). Paint on other layers instead.
+- The English and Japanese versions use the same data, so either one can edit lines made with the other.
+
 ## Requirements
 
-Aseprite with Lua scripting support (v1.3 or later recommended).
+Aseprite with Lua scripting support (v1.3 or later recommended). Bezier Curve needs v1.3 or later.
 
 ## License
 
