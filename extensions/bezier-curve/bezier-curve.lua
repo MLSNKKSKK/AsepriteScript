@@ -32,15 +32,15 @@ local TEXT = {
     fillGroup = "Fill",
     color = "   Color",
     width = "   Width",
-    pixelPerfect = "Pixel-perfect (width 1)",
-    antialias = "Antialias (smooth edges)",
-    antialiasIndexed = "Antialias (RGB and Grayscale only)",
-    closed = "Connect the ends",
-    stroke = "Draw the line",
-    fill = "Fill the inside",
+    pixelPerfect = "Pixel-perfect",
+    antialias = "Antialias",
+    antialiasIndexed = "Antialias (not in Indexed)",
+    closed = "Closed",
+    stroke = "Draw",
+    fill = "Fill",
     fillColor = "   Color",
-    oneSide = "Move one handle only",
-    guides = "Show guides",
+    oneSide = "One handle only",
+    guides = "Guides",
     newShape = "Draw New",
     place = "Place Shape...",
     placeTitle = "Place Shape",
@@ -49,7 +49,7 @@ local TEXT = {
                triangle = "Triangle", polygon = "Polygon", star = "Star" },
     sides = "Corners",
     rounding = "Rounding (%)",
-    sameSize = "Same width and height (circle, square...)",
+    sameSize = "Same width and height",
     placingShape = "Placing a Shape (drag; Esc: cancel)",
     hintPlace = "Bezier Curve: drag to place the shape (a click places it at a default size). Esc: cancel",
     deleteShape = "Delete Shape",
@@ -66,6 +66,42 @@ local TEXT = {
     undo = "Undo",
     redo = "Redo",
     stop = "Close",
+    helpButton = "?",
+    helpTitle = "Bezier Curve Help",
+    help = {
+      { "Shapes",
+        { "Draw New", "Finishes the current shape; the next click starts a new one" },
+        { "Place Shape...", "Places a circle, rectangle, star... by dragging on the canvas" },
+        { "Delete Shape", "Deletes the selected shape (Del: the selected point, or the shape)" },
+        { "Copy / Paste", "Pastes in the same place, also in other frames, layers or sprites" },
+        { "To Front ... To Back", "Changes the stacking order of the selected shape" } },
+      { "Selected Shape",
+        { "Antialias", "Smooths the edges of the line and the fill (RGB and Grayscale)" },
+        { "Line: Draw", "Draws the line; turn it off for a fill only" },
+        { "Color / Width", "The color and the width of the line (1-32)" },
+        { "Pixel-perfect", "Removes doubled pixels at the corners of 1px lines" },
+        { "Fill: Fill", "Fills the inside (an open shape is closed with a straight line)" } },
+      { "Editing",
+        { "One handle only", "Dragging a handle doesn't turn the other one (sharp corners)" },
+        { "Guides", "Shows or hides the points and handles" },
+        { "Closed", "Joins the last point to the first" },
+        { "Delete Point", "Deletes the selected point" },
+        { "Round/Sharp", "Switches the selected point between round and sharp" } },
+      { "Transform (selected shape, or all shapes)",
+        { "Transform Box", "Drag handles to scale; click inside for rotate/shear; drag the cross to move the center" },
+        { "Numeric...", "Scale, rotate (clockwise) and shear by numbers" },
+        { "Flip / Rotate 90°", "Flips or turns in place" },
+        { "Keep proportions", "Corner handles keep the width and height in proportion" } },
+      { "Other",
+        { "Undo / Redo", "Your changes to the shapes (also Ctrl+Z / Ctrl+Y)" },
+        { "Close", "Closes the panel and stops editing the layer" },
+        { "Rasterize", "Makes it a normal layer (the shapes can't be edited any more)" } },
+      { "On the canvas",
+        { "Click", "Adds a point; on a line or a fill, selects the shape" },
+        { "Drag", "Moves points, handles and shapes; from an empty spot, a curved point" },
+        { "First point", "Closes the shape being drawn" },
+        { "Enter, Esc", "Finishes the shape being drawn" } },
+    },
     transformAll = "Transform (all shapes)",
     transformSelected = "Transform (selected shape)",
     transformBox = "Transform Box",
@@ -75,13 +111,13 @@ local TEXT = {
     flipV = "Flip Vertical",
     rotateLeft = "Rotate Left 90°",
     rotateRight = "Rotate Right 90°",
-    keepRatio = "Keep proportions (corner handles)",
+    keepRatio = "Keep proportions",
     hintScale = "Transform: drag the squares to scale, inside to move. Click inside: rotate/shear. Enter, Esc or click outside: done",
     hintRotate = "Transform: drag the circles to rotate, the diamonds to shear, the cross to move the center. Click inside: scale. Enter, Esc or click outside: done",
     numericTitle = "Transform",
     scaleX = "Width (%)",
     scaleY = "Height (%)",
-    rotate = "Rotate (°, clockwise)",
+    rotate = "Rotate (°)",
     shearX = "Shear horizontally (°)",
     shearY = "Shear vertically (°)",
     ok = "OK",
@@ -115,15 +151,15 @@ local TEXT = {
     fillGroup = "塗り",
     color = "　色",
     width = "　太さ",
-    pixelPerfect = "ピクセルパーフェクト(太さ1のとき)",
-    antialias = "アンチエイリアス(縁をなめらかに)",
-    antialiasIndexed = "アンチエイリアス(RGB・グレースケールのみ)",
-    closed = "始点と終点をつなぐ",
-    stroke = "線を描く",
-    fill = "内側を塗りつぶす",
+    pixelPerfect = "ピクセルパーフェクト",
+    antialias = "アンチエイリアス",
+    antialiasIndexed = "アンチエイリアス(インデックス不可)",
+    closed = "両端をつなぐ",
+    stroke = "描く",
+    fill = "塗る",
     fillColor = "　色",
-    oneSide = "ハンドルを片側だけ動かす",
-    guides = "ガイドを表示",
+    oneSide = "ハンドル片側のみ",
+    guides = "ガイド表示",
     newShape = "新しく作図",
     place = "図形を配置…",
     placeTitle = "図形を配置",
@@ -132,7 +168,7 @@ local TEXT = {
                triangle = "三角", polygon = "多角形", star = "星" },
     sides = "角の数",
     rounding = "角の丸み(%)",
-    sameSize = "縦横を同じにする(正円・正方形など)",
+    sameSize = "縦横を同じにする",
     placingShape = "図形を配置中(ドラッグで配置、Esc でやめる)",
     hintPlace = "ベジェ曲線: ドラッグで図形を配置(クリックで標準の大きさ)。Esc でやめる",
     deleteShape = "図形を削除",
@@ -149,6 +185,42 @@ local TEXT = {
     undo = "元に戻す",
     redo = "やり直す",
     stop = "閉じる",
+    helpButton = "?",
+    helpTitle = "ベジェ曲線のヘルプ",
+    help = {
+      { "図形",
+        { "新しく作図", "今の図形を終え、次のクリックで新しい図形を描き始める" },
+        { "図形を配置…", "円・四角・星などを、キャンバスをドラッグして置く" },
+        { "図形を削除", "選択中の図形を削除(Del: 選択中の点、なければ図形)" },
+        { "コピー / 貼り付け", "同じ位置に貼り付け。ほかのフレーム・レイヤー・スプライトにも" },
+        { "最前面へ〜最背面へ", "選択中の図形の重なり順を変える" } },
+      { "選択中の図形",
+        { "アンチエイリアス", "線と塗りの縁をなめらかに(RGB・グレースケールのみ)" },
+        { "線: 描く", "線を描く。オフにすると塗りだけ" },
+        { "色 / 太さ", "線の色と太さ(1〜32)" },
+        { "ピクセルパーフェクト", "太さ1の線の角のだぶったピクセルを取る" },
+        { "塗り: 塗る", "内側を塗る(閉じていない図形は両端を直線で結んで塗る)" } },
+      { "編集",
+        { "ハンドル片側のみ", "ハンドルを動かしても反対側が回らない(とがった角に)" },
+        { "ガイド表示", "点とハンドルの表示を切り替える" },
+        { "両端をつなぐ", "最後の点を最初の点につないで閉じる" },
+        { "点を削除", "選択中の点を削除" },
+        { "丸/角", "選択中の点を丸(ハンドルあり)と角で切り替える" } },
+      { "変形(選択中の図形、なければすべての図形)",
+        { "変形ボックス", "ハンドルで拡大縮小。内側クリックで回転・シアー。十字で中心を移動" },
+        { "数値で変形…", "拡大縮小・回転(時計回り)・傾きを数値で" },
+        { "反転 / 90°回転", "その場で反転・回転" },
+        { "縦横比を保つ", "変形ボックスの角で縦横の比率を保つ" } },
+      { "その他",
+        { "元に戻す / やり直す", "図形への変更を戻す・やり直す(Ctrl+Z / Ctrl+Y も)" },
+        { "閉じる", "パネルを閉じて、このレイヤーの編集をやめる" },
+        { "ラスタライズ", "普通のレイヤーにする(曲線として編集できなくなる)" } },
+      { "キャンバス",
+        { "クリック", "点を追加。線や塗りの上なら図形を選択" },
+        { "ドラッグ", "点・ハンドル・図形を動かす。何もないところからは曲線の点" },
+        { "始点をクリック", "描いている図形を閉じる" },
+        { "Enter・Esc", "描いている図形を終える" } },
+    },
     transformAll = "変形(すべての図形)",
     transformSelected = "変形(選択中の図形)",
     transformBox = "変形ボックス",
@@ -158,13 +230,13 @@ local TEXT = {
     flipV = "上下反転",
     rotateLeft = "左に90°回転",
     rotateRight = "右に90°回転",
-    keepRatio = "縦横比を保つ(角のハンドル)",
+    keepRatio = "縦横比を保つ",
     hintScale = "変形: 四角をドラッグで拡大縮小、内側をドラッグで移動。内側をクリックで回転・シアーに切り替え。Enter・Esc・外側をクリックで終了",
     hintRotate = "変形: 丸をドラッグで回転、ひし形でシアー、十字で中心を移動。内側をクリックで拡大縮小に切り替え。Enter・Esc・外側をクリックで終了",
     numericTitle = "数値で変形",
     scaleX = "横幅(%)",
     scaleY = "高さ(%)",
-    rotate = "回転(°、時計回り)",
+    rotate = "回転(°)",
     shearX = "横に傾ける(°)",
     shearY = "縦に傾ける(°)",
     ok = "OK",
@@ -2408,6 +2480,22 @@ local function numericTransform(s)
   end
 end
 
+-- Help: what each item of the panel does (scripts can't show tooltips).
+-- It doesn't block the panel, so it can stay open while editing.
+local helpDialog = nil
+local function showHelp()
+  if helpDialog then pcall(function() helpDialog:close() end) end
+  local dlg = Dialog{ title = T.helpTitle, onclose = function() helpDialog = nil end }
+  for _, section in ipairs(T.help) do
+    dlg:separator{ text = section[1] }
+    for i = 2, #section do dlg:label{ label = section[i][1], text = section[i][2] } end
+  end
+  dlg:separator{}
+  dlg:button{ text = T.ok }
+  helpDialog = dlg
+  dlg:show{ wait = false }
+end
+
 ------------------------------------------------------------------------
 -- Panel
 
@@ -2556,6 +2644,7 @@ openPanel = function()
      :button{ id = "stop", text = T.stop, onclick = stopEditing }
      :button{ id = "rasterize", text = T.rasterize,
               onclick = function() app.command.BezierCurveRasterize() end }
+     :button{ id = "help", text = T.helpButton, onclick = showHelp }
   panel = dlg
   dlg:show{ wait = false }
 
@@ -2802,6 +2891,7 @@ function exit(plugin)
   if S then pcall(finishSession, false) end
   S = nil
   closePanel()
+  if helpDialog then pcall(function() helpDialog:close() end) end
   -- Keep the note of the original value: if Aseprite saved its preferences
   -- before this, it's put back again at the next start
   local saved = prefs.savedDoubleClick
