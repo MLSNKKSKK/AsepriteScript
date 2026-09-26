@@ -237,7 +237,7 @@ At the top of the panel are the buttons for drawing and placing new shapes, dele
 | **Undo** / **Redo** | Undo / redo your changes to the shapes. |
 | **Close** | Closes the panel and stops editing the layer, so you can use Aseprite's tools on it (for example the Move tool). Closing the panel with its × button does the same. Selecting the layer again, or **Layer > Edit Curves**, starts editing again. |
 | **Rasterize** | Turns the curve layer into a normal layer (see below). |
-| **?** | Opens a help window that lists what each item does (Aseprite scripts can't show tooltips). It can stay open while you edit. |
+| **Help** | Opens a help window that lists what each item does (Aseprite scripts can't show tooltips). It can stay open while you edit. |
 
 When a shape is selected, the fields show its settings and changing them changes that shape. When no shape is selected, the section is called **Next Shape** and holds the settings for the next new shape (while you draw one, it says **Drawing a Shape**).
 

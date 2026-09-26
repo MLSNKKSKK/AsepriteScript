@@ -66,7 +66,7 @@ local TEXT = {
     undo = "Undo",
     redo = "Redo",
     stop = "Close",
-    helpButton = "?",
+    helpButton = "Help",
     helpTitle = "Bezier Curve Help",
     help = {
       { "Shapes",
@@ -185,7 +185,7 @@ local TEXT = {
     undo = "元に戻す",
     redo = "やり直す",
     stop = "閉じる",
-    helpButton = "?",
+    helpButton = "ヘルプ",
     helpTitle = "ベジェ曲線のヘルプ",
     help = {
       { "図形",
