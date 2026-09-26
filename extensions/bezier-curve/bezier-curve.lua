@@ -31,6 +31,8 @@ local TEXT = {
     color = "Color",
     width = "Width",
     pixelPerfect = "Pixel-perfect (width 1)",
+    antialias = "Antialias (smooth edges)",
+    antialiasIndexed = "Antialias (RGB and Grayscale only)",
     closed = "Connect the ends",
     stroke = "Draw the line",
     fill = "Fill the inside",
@@ -75,6 +77,8 @@ local TEXT = {
     color = "色",
     width = "太さ",
     pixelPerfect = "ピクセルパーフェクト(太さ1のとき)",
+    antialias = "アンチエイリアス(縁をなめらかに)",
+    antialiasIndexed = "アンチエイリアス(RGB・グレースケールのみ)",
     closed = "始点と終点をつなぐ",
     stroke = "線を描く",
     fill = "内側を塗りつぶす",
@@ -139,7 +143,8 @@ end
 -- A smooth node keeps both handles on a straight line.
 -- A line can also fill its inside (fill, fillColor). An open line is filled
 -- as if its ends were joined by a straight line. With stroke off, only the
--- fill is drawn.
+-- fill is drawn. With antialias on, the edges of the line and the fill are
+-- smoothed with partly transparent pixels.
 
 local function colorToTable(c)
   return { r = c.red, g = c.green, b = c.blue, a = c.alpha, index = c.index }
@@ -156,9 +161,10 @@ local function serialize(paths)
   local lines = {}
   for _, p in ipairs(paths) do
     local c, f = p.color, p.fillColor or p.color
-    lines[#lines + 1] = string.format("path %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
+    lines[#lines + 1] = string.format("path %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
       c.r, c.g, c.b, c.a, c.index, p.width, p.closed and 1 or 0, p.pixelPerfect and 1 or 0,
-      p.fill and 1 or 0, f.r, f.g, f.b, f.a, f.index, p.stroke == false and 0 or 1)
+      p.fill and 1 or 0, f.r, f.g, f.b, f.a, f.index, p.stroke == false and 0 or 1,
+      p.antialias and 1 or 0)
     for _, n in ipairs(p.nodes) do
       lines[#lines + 1] = string.format("node %d %d %.2f %.2f %.2f %.2f %d",
         n.x, n.y, h(n.ix), h(n.iy), h(n.ox), h(n.oy), n.smooth and 1 or 0)
@@ -183,6 +189,7 @@ local function parse(text)
         -- Older data has no fill fields (no fill, line drawn)
         fill = num(10) == 1,
         stroke = v[16] == nil or num(16) == 1,
+        antialias = num(17) == 1,
         fillColor = v[15] and { r = floor(num(11)), g = floor(num(12)), b = floor(num(13)),
                                 a = floor(num(14)), index = floor(num(15)) }
                     or { r = color.r, g = color.g, b = color.b, a = color.a, index = color.index },
@@ -394,16 +401,173 @@ local function colorPixel(sprite, c)
   return pc.rgba(c.r, c.g, c.b, c.a)
 end
 
+------------------------------------------------------------------------
+-- Antialiasing
+--
+-- An antialiased line gives each pixel an alpha by how much of the pixel
+-- the line (or fill) covers, and blends it over what's already drawn.
+-- Indexed images can't have partly transparent pixels, so there the line
+-- is drawn without antialiasing.
+
+local function antialiased(sprite, p)
+  return p.antialias and sprite.colorMode ~= ColorMode.INDEXED
+end
+
+-- The path as a list of points joined by straight lines, which stay within
+-- 0.02 pixels of the curve
+local function flatten(p)
+  local pts = { { p.nodes[1].x, p.nodes[1].y } }
+  for _, sg in ipairs(segments(p)) do
+    local a, b = sg[1], sg[2]
+    -- How sharply the curve can bend, which sets how many pieces it needs
+    local p1x, p1y, p2x, p2y = a.x + a.ox, a.y + a.oy, b.x + b.ix, b.y + b.iy
+    local bend = math.max(dist(0, 0, a.x - 2 * p1x + p2x, a.y - 2 * p1y + p2y),
+                          dist(0, 0, p1x - 2 * p2x + b.x, p1y - 2 * p2y + b.y))
+    local steps = math.max(1, math.min(1000, math.ceil(sqrt(37.5 * bend))))
+    for i = 1, steps do
+      local x, y = bezier(a, b, i / steps)
+      pts[#pts + 1] = { x, y }
+    end
+  end
+  return pts
+end
+
+-- Calls fn(x, y, coverage) for every pixel of the canvas the line touches,
+-- with how much of the pixel it covers (0..1)
+local function coverPath(sprite, p, fn)
+  local pts = flatten(p)
+  local reach = p.width / 2 + 0.5   -- pixels whose center is closer than this are touched
+  local W, H = sprite.width, sprite.height
+  local near = {}                   -- squared distance from each pixel to the line
+  local function visit(ax, ay, bx, by)
+    local dx, dy = bx - ax, by - ay
+    local l2 = dx * dx + dy * dy
+    for y = math.max(0, math.ceil(math.min(ay, by) - reach)), math.min(H - 1, floor(math.max(ay, by) + reach)) do
+      for x = math.max(0, math.ceil(math.min(ax, bx) - reach)), math.min(W - 1, floor(math.max(ax, bx) + reach)) do
+        local u = 0
+        if l2 > 0 then u = math.max(0, math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) end
+        local ex, ey = x - ax - u * dx, y - ay - u * dy
+        local d2, k = ex * ex + ey * ey, y * W + x
+        if not near[k] or d2 < near[k] then near[k] = d2 end
+      end
+    end
+  end
+  if #pts == 1 then visit(pts[1][1], pts[1][2], pts[1][1], pts[1][2]) end
+  for i = 1, #pts - 1 do visit(pts[i][1], pts[i][2], pts[i + 1][1], pts[i + 1][2]) end
+  for k, d2 in pairs(near) do
+    local c = reach - sqrt(d2)
+    if c > 0 then fn(k % W, k // W, math.min(1, c)) end
+  end
+end
+
+-- Calls fn(x, y, coverage) for every pixel of the canvas the inside of the
+-- line touches (nonzero winding rule), with how much of the pixel is inside
+local FILL_SAMPLES = 8   -- rows looked at in each pixel row
+local function coverFill(sprite, p, fn)
+  if #p.nodes < 2 then return end
+  local pts = flatten(p)
+  local n, W, H = #pts, sprite.width, sprite.height
+  -- The edges, listed under each pixel row they reach
+  local rows = {}
+  for i = 1, n do
+    local a, b = pts[i], pts[i % n + 1]
+    if a[2] ~= b[2] then
+      local e = { a[1], a[2], b[1], b[2], b[2] > a[2] and 1 or -1 }
+      for y = math.max(0, floor(math.min(a[2], b[2]))), math.min(H - 1, math.ceil(math.max(a[2], b[2]))) do
+        local list = rows[y]
+        if not list then list = {}; rows[y] = list end
+        list[#list + 1] = e
+      end
+    end
+  end
+  for y, edges in pairs(rows) do
+    local part, full = {}, {}   -- coverage of pixels partly covered, and runs of full ones
+    local lo, hi = math.huge, -math.huge
+    local w = 1 / FILL_SAMPLES
+    local function span(xa, xb)
+      xa, xb = math.max(xa, -0.5), math.min(xb, W - 0.5)
+      if xb <= xa then return end
+      local i0, i1 = floor(xa + 0.5), floor(xb + 0.5)   -- pixel x covers x-0.5 .. x+0.5
+      if i0 == i1 then
+        part[i0] = (part[i0] or 0) + (xb - xa) * w
+      else
+        part[i0] = (part[i0] or 0) + (i0 + 0.5 - xa) * w
+        part[i1] = (part[i1] or 0) + (xb - i1 + 0.5) * w
+        full[i0 + 1] = (full[i0 + 1] or 0) + w
+        full[i1] = (full[i1] or 0) - w
+      end
+      if i0 < lo then lo = i0 end
+      if i1 > hi then hi = i1 end
+    end
+    for s = 0, FILL_SAMPLES - 1 do
+      local yy = y - 0.5 + (s + 0.5) * w
+      local xs = {}
+      for _, e in ipairs(edges) do
+        if (e[2] <= yy and e[4] > yy) or (e[4] <= yy and e[2] > yy) then
+          xs[#xs + 1] = { e[1] + (yy - e[2]) / (e[4] - e[2]) * (e[3] - e[1]), e[5] }
+        end
+      end
+      table.sort(xs, function(u, v) return u[1] < v[1] end)
+      local winding = 0
+      for i = 1, #xs - 1 do
+        winding = winding + xs[i][2]
+        if winding ~= 0 then span(xs[i][1], xs[i + 1][1]) end
+      end
+    end
+    local run = 0
+    for x = lo, math.min(hi, W - 1) do
+      run = run + (full[x] or 0)
+      local c = run + (part[x] or 0)
+      if c > 0.0001 then fn(x, y, math.min(1, c)) end
+    end
+  end
+end
+
+-- Pixel value of color c covering part of a pixel (0..1) over the pixel
+-- value `under`, or nil if nothing would show
+local function blendPixel(sprite, c, cover, under)
+  local a = round(c.a * cover)
+  if a <= 0 then return nil end
+  local sa, gray = a / 255, sprite.colorMode == ColorMode.GRAY
+  local ua = 0
+  if under then ua = (gray and pc.grayaA(under) or pc.rgbaA(under)) / 255 end
+  if ua == 0 then
+    if gray then return pc.graya(grayOf(c), a) end
+    return pc.rgba(c.r, c.g, c.b, a)
+  end
+  local oa = sa + ua * (1 - sa)
+  local function mix(v, uv) return round((v * sa + uv * ua * (1 - sa)) / oa) end
+  if gray then return pc.graya(mix(grayOf(c), pc.grayaV(under)), round(oa * 255)) end
+  return pc.rgba(mix(c.r, pc.rgbaR(under)), mix(c.g, pc.rgbaG(under)), mix(c.b, pc.rgbaB(under)),
+                 round(oa * 255))
+end
+
 -- Draws a line (its fill first, then the line itself) by calling
--- put(x, y, pixel value) for each pixel
-local function drawPath(sprite, p, put)
+-- put(x, y, pixel value) for each pixel. An antialiased line is blended
+-- over what get(x, y) returns (nil for nothing).
+local function drawPath(sprite, p, put, get)
+  local aa = antialiased(sprite, p)
+  local function blend(c)
+    return function(x, y, cover)
+      local v = blendPixel(sprite, c, cover, get(x, y))
+      if v then put(x, y, v) end
+    end
+  end
   if p.fill then
-    local fv = colorPixel(sprite, p.fillColor)
-    fillPath(sprite, p, function(x, y) put(x, y, fv) end)
+    if aa then
+      coverFill(sprite, p, blend(p.fillColor))
+    else
+      local fv = colorPixel(sprite, p.fillColor)
+      fillPath(sprite, p, function(x, y) put(x, y, fv) end)
+    end
   end
   if p.stroke ~= false then
-    local v = colorPixel(sprite, p.color)
-    plotPath(sprite, p, function(x, y) put(x, y, v) end)
+    if aa then
+      coverPath(sprite, p, blend(p.color))
+    else
+      local v = colorPixel(sprite, p.color)
+      plotPath(sprite, p, function(x, y) put(x, y, v) end)
+    end
   end
 end
 
@@ -418,7 +582,8 @@ end
 local function renderPaths(sprite, paths)
   local img = blankImage(sprite, sprite.width, sprite.height)
   for _, p in ipairs(paths) do
-    drawPath(sprite, p, function(x, y, v) img:drawPixel(x, y, v) end)
+    drawPath(sprite, p, function(x, y, v) img:drawPixel(x, y, v) end,
+             function(x, y) return img:getPixel(x, y) end)
   end
   return img
 end
@@ -786,11 +951,14 @@ local function syncFields()
   local s, dlg = S, panel
   if not s or not dlg then return end
   local p = s.paths[s.active]
+  local indexed = s.sprite.colorMode == ColorMode.INDEXED
   s.syncing = true
+  dlg:modify{ id = "antialias", text = indexed and T.antialiasIndexed or T.antialias }
   if p then
     dlg:modify{ id = "color", color = tableToColor(s.sprite, p.color) }
     dlg:modify{ id = "width", value = p.width }
     dlg:modify{ id = "pixelPerfect", selected = p.pixelPerfect }
+    dlg:modify{ id = "antialias", selected = p.antialias }
     dlg:modify{ id = "closed", selected = p.closed }
     dlg:modify{ id = "stroke", selected = p.stroke ~= false }
     dlg:modify{ id = "fill", selected = p.fill }
@@ -808,6 +976,10 @@ local function updateButtons()
   if not s or not dlg then return end
   local p = s.paths[s.active]
   local hasPoint = p ~= nil and s.selNode ~= nil
+  -- Antialiasing needs RGB or Grayscale, and replaces pixel-perfect
+  local indexed = s.sprite.colorMode == ColorMode.INDEXED
+  dlg:modify{ id = "antialias", enabled = not indexed }
+  dlg:modify{ id = "pixelPerfect", enabled = indexed or not dlg.data.antialias }
   dlg:modify{ id = "closed", enabled = p ~= nil }
   dlg:modify{ id = "deleteLine", enabled = p ~= nil }
   dlg:modify{ id = "deletePoint", enabled = hasPoint }
@@ -965,12 +1137,15 @@ local function redraw()
     prepareCel()   -- the first point on a frame without a cel
   end
   local want = {}
-  for _, p in ipairs(s.paths) do
-    drawPath(s.sprite, p, function(x, y, v)
-      local k = overlayKey(s.ov, x, y)
-      if k then want[k] = v end
-    end)
+  local function put(x, y, v)
+    local k = overlayKey(s.ov, x, y)
+    if k then want[k] = v end
   end
+  local function get(x, y)
+    local k = overlayKey(s.ov, x, y)
+    return k and want[k]
+  end
+  for _, p in ipairs(s.paths) do drawPath(s.sprite, p, put, get) end
   addGuides(want)
   showOverlay(s.ov, want)
 end
@@ -1150,13 +1325,15 @@ local function addPoint(x, y)
   local p = s.paths[s.active]
   if not p or p.closed then
     local color, width, perfect, fill, fillColor, stroke = app.fgColor, 1, true, false, app.fgColor, true
+    local aa = false
     if panel then
       local d = panel.data
       color, width, perfect, fill, fillColor, stroke =
         d.color, d.width, d.pixelPerfect, d.fill, d.fillColor, d.stroke
+      aa = d.antialias and s.sprite.colorMode ~= ColorMode.INDEXED
     end
     p = { color = colorToTable(color), width = width, pixelPerfect = perfect, stroke = stroke,
-          fill = fill, fillColor = colorToTable(fillColor), closed = false, nodes = {} }
+          antialias = aa, fill = fill, fillColor = colorToTable(fillColor), closed = false, nodes = {} }
     s.paths[#s.paths + 1] = p
     select(#s.paths, nil)
   end
@@ -1454,9 +1631,10 @@ end
 local function changeStyle(key, apply)
   local s = S
   if panel then
-    -- Remember the width and pixel-perfect settings for next time
+    -- Remember the width, pixel-perfect and antialias settings for next time
     prefs.width = panel.data.width
     prefs.pixelPerfect = panel.data.pixelPerfect
+    prefs.antialias = panel.data.antialias
   end
   if not s or s.finished or s.syncing then return end
   local p = s.paths[s.active]
@@ -1497,6 +1675,11 @@ openPanel = function()
      :check{ id = "pixelPerfect", text = T.pixelPerfect, selected = prefs.pixelPerfect ~= false,
              onclick = function()
                changeStyle("pixelPerfect", function(p) p.pixelPerfect = dlg.data.pixelPerfect end)
+             end }
+     :check{ id = "antialias", label = "", text = T.antialias, selected = prefs.antialias == true,
+             onclick = function()
+               changeStyle("antialias", function(p) p.antialias = dlg.data.antialias end)
+               updateButtons()
              end }
      :check{ id = "closed", label = "", text = T.closed, selected = false,
              onclick = function()

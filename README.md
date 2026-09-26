@@ -175,7 +175,7 @@ An extension that adds **curve layers**. Lines on a curve layer are drawn with B
 
 - Click and drag on the canvas, like the Pen tool in drawing apps. A small panel holds the settings
 - Several lines per layer, each with its own color and width (1–32 px, round brush)
-- Pixel-perfect option for clean 1px lines
+- Pixel-perfect option for clean 1px lines, or antialiasing for smooth edges (RGB and Grayscale)
 - Closed shapes (connect the last point to the first), and filling the inside with a color, with or without the line
 - Each frame has its own lines
 - Works with RGB, Grayscale and Indexed sprites
@@ -213,7 +213,8 @@ Grayscale sprites can't show green, and neither can Indexed sprites whose palett
 | **Color** | The line color. Starts as the current foreground color. |
 | **Width** | The line width in pixels (1–32). |
 | **Draw the line** | Turn it off to draw only the fill, without a line around it. |
-| **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines (the line's own points are always kept, so the corners of a square stay sharp). |
+| **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines (the line's own points are always kept, so the corners of a square stay sharp). Not used with antialiasing. |
+| **Antialias (smooth edges)** | Smooths the edges of the line and the fill with partly transparent pixels. Where lines overlap, they blend with each other. RGB and Grayscale only: Indexed sprites can't have partly transparent pixels, so there it's turned off. |
 | **Connect the ends** | Joins the last point of the selected line back to the first. |
 | **Fill the inside** | Fills the inside of the line. A line whose ends aren't connected is filled as if they were joined by a straight line. The line is drawn on top of the fill. |
 | **Fill Color** | The fill color. |
