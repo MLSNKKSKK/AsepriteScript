@@ -35,7 +35,7 @@ local TEXT = {
     color = "   Color",
     width = "   Width",
     pixelPerfect = "Pixel-perfect (width 1)",
-    antialias = "Antialias (smooth edges)",
+    antialias = "Antialias",
     antialiasIndexed = "Antialias (RGB and Grayscale only)",
     closed = "Connect the ends",
     stroke = "Draw the line",
@@ -106,7 +106,7 @@ local TEXT = {
     color = "　色",
     width = "　太さ",
     pixelPerfect = "ピクセルパーフェクト(太さ1のとき)",
-    antialias = "アンチエイリアス(縁をなめらかに)",
+    antialias = "アンチエイリアス",
     antialiasIndexed = "アンチエイリアス(RGB・グレースケールのみ)",
     closed = "始点と終点をつなぐ",
     stroke = "線を描く",
@@ -2255,15 +2255,16 @@ openPanel = function()
              onclick = function()
                changeStyle("closed", function(p) p.closed = dlg.data.closed end)
              end }
-     :check{ id = "antialias", label = "", text = T.antialias, selected = prefs.antialias == true,
-             onclick = function()
-               changeStyle("antialias", function(p) p.antialias = dlg.data.antialias end)
-               updateButtons()
-             end }
      :separator{ id = "lineSep", text = T.lineGroup }
      :check{ id = "stroke", label = "", text = T.stroke, selected = true,
              onclick = function()
                changeStyle("stroke", function(p) p.stroke = dlg.data.stroke end)
+             end }
+     -- (smooths the edges of the fill too)
+     :check{ id = "antialias", text = T.antialias, selected = prefs.antialias == true,
+             onclick = function()
+               changeStyle("antialias", function(p) p.antialias = dlg.data.antialias end)
+               updateButtons()
              end }
      :color{ id = "color", label = T.color, color = app.fgColor,
              onchange = function()

@@ -217,8 +217,8 @@ At the top of the panel, below a short help text, are the buttons for new shapes
 | **Delete Shape** | Deletes the selected shape. |
 | **Copy** / **Paste** | **Copy** copies the selected shape, or all the shapes of the frame when none is selected. **Paste** adds them at the same place to the frame you're editing, which can be another frame, layer or sprite (handy for animation). When they would land exactly on the same shapes (for example when you paste in the frame you copied from), they go 4 pixels away, towards the inside of the canvas, so Copy and Paste also duplicate shapes. A single pasted shape gets selected. To copy a whole frame, you can also copy its cel in the timeline (for example by dragging it with Ctrl held down): the curves go along and stay editable. |
 | **Connect the ends** | Joins the last point of the selected shape back to the first. |
-| **Antialias (smooth edges)** | Smooths the edges of the line and the fill with partly transparent pixels. Where shapes overlap, they blend with each other. RGB and Grayscale only: Indexed sprites can't have partly transparent pixels, so there it's turned off. |
 | **Line**: **Draw the line** | Turn it off to draw only the fill, without a line around it. |
+| **Line**: **Antialias** | Smooths the edges of the line, and of the fill too, with partly transparent pixels. Where shapes overlap, they blend with each other. RGB and Grayscale only: Indexed sprites can't have partly transparent pixels, so there it's turned off. |
 | **Line**: **Color** | The line color. Starts as the current foreground color. |
 | **Line**: **Width** | The line width in pixels (1–32). |
 | **Line**: **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines (the shape's own points are always kept, so the corners of a square stay sharp). Not used with antialiasing. |
