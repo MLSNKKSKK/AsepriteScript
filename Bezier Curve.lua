@@ -1,16 +1,19 @@
 -- Bezier Curve
--- Draws lines with Bezier curves that you can edit again later.
--- * Place points and drag their handles in the editor window. The lines are
---   drawn on a "curve layer" right above the active layer.
--- * Run the script again with the curve layer selected to edit the lines:
---   move points, bend them, change the color or width, add or delete lines.
+-- Draws lines with Bezier curves right on the canvas, and lets you edit them
+-- again later.
+-- * Click on the canvas to add points, and drag points or handles to bend the
+--   line. A small panel holds the color, width and the Apply/Cancel buttons.
+-- * The lines are drawn on a "curve layer" right above the active layer.
+--   Run the script again with the curve layer selected to edit them.
 -- * The curve data is saved in the cel, so it's kept in the .aseprite file.
 --   Each frame has its own lines. Applying an edit is a single Ctrl+Z.
 
 local KEY = "asepritescript/bezier-curve"
 local TITLE = "Bezier Curve"
+local SESSION = KEY .. "/session"   -- global set while an edit is open
+local PANEL_BOUNDS = KEY .. "/panel"  -- where the panel was last time
 
-if not app.apiVersion or app.apiVersion < 21 then
+if not app.apiVersion or app.apiVersion < 24 then
   app.alert("This script needs Aseprite v1.3 or later.")
   return
 end
@@ -18,14 +21,36 @@ end
 -- Editing needs the canvas, so there's nothing to do without a UI
 if not app.isUIAvailable then return end
 
+-- Only one edit at a time
+local running = rawget(_G, SESSION)
+if running then
+  local r = app.alert{ title = TITLE,
+    text = "A curve is already being edited. Apply or cancel it in its panel first.",
+    buttons = { "OK", "Apply It Now" } }
+  if r == 2 then
+    pcall(running.finish, true, false)
+    rawset(_G, SESSION, nil)
+  end
+  return
+end
+
 local sprite = app.sprite
 if not sprite then
   app.alert("No sprite is open.")
   return
 end
 
+local editor = app.editor
+if not editor or editor.sprite ~= sprite then
+  app.alert("Show the sprite in the editor and try again.")
+  return
+end
+
 local frameNumber = app.frame and app.frame.frameNumber or 1
 local src = app.layer
+
+-- A temporary guide layer left behind (e.g. after a crash) isn't a place to draw
+if src and src.properties(KEY).guide == true then src = nil end
 
 local curveLayer = nil
 if src and src.isImage and not src.isTilemap and src.properties(KEY).curve == true then
@@ -239,21 +264,6 @@ local function outputPixel(p)
   return pc.rgba(c.r, c.g, c.b, c.a)
 end
 
--- RGB pixel value used in the editor preview
-local function previewPixel(p)
-  local c = p.color
-  if sprite.colorMode == ColorMode.INDEXED then
-    local pal = sprite.palettes[1]
-    if c.index == sprite.transparentColor or c.index < 0 or c.index >= #pal then return 0 end
-    local pcol = pal:getColor(c.index)
-    return pc.rgba(pcol.red, pcol.green, pcol.blue, pcol.alpha)
-  elseif sprite.colorMode == ColorMode.GRAY then
-    local g = grayOf(c)
-    return pc.rgba(g, g, g, c.a)
-  end
-  return pc.rgba(c.r, c.g, c.b, c.a)
-end
-
 -- Draws all the lines into a new image trimmed to their bounds.
 -- Returns the image and its position on the canvas.
 local function renderPaths(paths)
@@ -323,55 +333,205 @@ if oldCel then
   end
 end
 
--- The sprite as it looks now, without the curve layer
-local bgImage = Image(sprite.width, sprite.height, ColorMode.RGB)
-do
-  local wasVisible = curveLayer and curveLayer.isVisible
-  if curveLayer then curveLayer.isVisible = false end
-  bgImage:drawSprite(sprite, frameNumber, Point(0, 0))
-  if curveLayer then curveLayer.isVisible = wasVisible end
+------------------------------------------------------------------------
+-- Editing session
+--
+-- Scripts can't draw on top of the canvas. So while editing, the lines are
+-- drawn straight into the curve layer, and the points and handles into a
+-- temporary guide layer at the top. These pixels are written without undo
+-- information and are put back exactly as they were before anything else
+-- can touch the sprite. Setting up the layers is one undo step, which is
+-- undone again at the end, so the history only keeps the final result.
+
+local GUIDE_NAME = "Bezier Curve guides (editing)"
+local HINT = "Bezier Curve: click to add points, drag points or handles to edit them"
+local HIT = 6   -- how close (in screen pixels) a click must be to grab something
+
+-- Commands that only change the view. Any other command applies the edit first.
+local VIEW_COMMANDS = {}
+for _, name in ipairs{
+  "About", "AdvancedMode", "ChangeBrush", "ChangeColor", "ContiguousFill", "Eyedropper",
+  "FitScreen", "FullscreenMode", "FullscreenPreview", "GotoNextLayer", "GotoPreviousLayer",
+  "KeyboardShortcuts", "Options", "PixelPerfectMode", "Refresh", "Screenshot", "Scroll",
+  "ScrollCenter", "SetColorSelector", "SetInkType", "SetPaletteEntrySize", "SetSameInk",
+  "ShowAutoGuides", "ShowBrushPreview", "ShowBrushPreviewInPreview", "ShowExtras", "ShowGrid",
+  "ShowLayerEdges", "ShowMenu", "ShowOnionSkin", "ShowPixelGrid", "ShowSelectionEdges",
+  "ShowSlices", "ShowTileNumbers", "SnapToGrid", "SwapCheckerboardColors", "SwitchColors",
+  "SymmetryMode", "TiledMode", "Timeline", "ToggleOtherLayersOpacity", "TogglePreview",
+  "ToggleTilesMode", "ToggleTimelineThumbnails", "ToggleWorkspaceLayout", "Zoom",
+} do
+  VIEW_COMMANDS[name] = true
 end
-local previewImage = Image(sprite.width, sprite.height, ColorMode.RGB)
+
+local function newLayerName()
+  local used = {}
+  local function scan(layers)
+    for _, l in ipairs(layers) do
+      used[l.name] = true
+      if l.isGroup then scan(l.layers) end
+    end
+  end
+  scan(sprite.layers)
+  local n = 1
+  while used["Curve " .. n] do n = n + 1 end
+  return "Curve " .. n
+end
+
+local function blankImage(w, h)
+  local img = Image(ImageSpec{ width = w, height = h,
+    colorMode = sprite.colorMode, transparentColor = sprite.transparentColor })
+  img:clear()
+  return img
+end
+
+-- Pixel value of a guide color in the sprite's color mode
+local function guidePixel(r, g, b)
+  if sprite.colorMode == ColorMode.INDEXED then
+    -- The closest palette entry
+    local pal = sprite.palettes[1]
+    local best, bestD = 0, math.huge
+    for i = 0, #pal - 1 do
+      if i ~= sprite.transparentColor then
+        local c = pal:getColor(i)
+        local d = (c.red - r) ^ 2 + (c.green - g) ^ 2 + (c.blue - b) ^ 2
+        if d < bestD then best, bestD = i, d end
+      end
+    end
+    return best
+  elseif sprite.colorMode == ColorMode.GRAY then
+    return pc.graya(grayOf{ r = r, g = g, b = b }, 255)
+  end
+  return pc.rgba(r, g, b, 255)
+end
+
+local GUIDE_POINT = guidePixel(255, 0, 200)      -- points of the selected line
+local GUIDE_SELECTED = guidePixel(255, 230, 0)   -- the selected point
+local GUIDE_HANDLE = guidePixel(0, 200, 255)     -- handles
+local GUIDE_OTHER = guidePixel(150, 70, 220)     -- points of the other lines
+
+-- Set up: a curve layer whose cel covers the whole canvas (with the same
+-- pixels as before), and a guide layer at the top
+
+local createdLayer = not curveLayer
+local layer = curveLayer
+local cel, guideLayer
+local oldImage = oldCel and oldCel.image:clone()
+local oldPos = oldCel and oldCel.position
+
+-- The new cel covers the canvas and the old cel
+local bx, by, bw, bh = 0, 0, sprite.width, sprite.height
+if oldCel then
+  local b = oldCel.bounds
+  local x2 = math.max(sprite.width, b.x + b.width)
+  local y2 = math.max(sprite.height, b.y + b.height)
+  bx, by = math.min(0, b.x), math.min(0, b.y)
+  bw, bh = x2 - bx, y2 - by
+end
+local shown = {}   -- pixels of that cel that aren't transparent
+
+app.transaction(TITLE, function()
+  local stale = {}
+  for _, l in ipairs(sprite.layers) do
+    if l.properties(KEY).guide == true then stale[#stale + 1] = l end
+  end
+  for _, l in ipairs(stale) do sprite:deleteLayer(l) end
+
+  if not layer then
+    layer = sprite:newLayer()
+    layer.name = newLayerName()
+    if src then
+      layer.parent = src.parent
+      layer.stackIndex = src.stackIndex + 1
+    end
+    layer.properties(KEY).curve = true
+  end
+
+  local full = blankImage(bw, bh)
+  if oldCel then
+    local mask = full.spec.transparentColor
+    for it in oldImage:pixels() do
+      local v = it()
+      local ix, iy = it.x + oldPos.x - bx, it.y + oldPos.y - by
+      full:drawPixel(ix, iy, v)
+      if v ~= mask then shown[iy * bw + ix] = v end
+    end
+    oldCel.image = full
+    oldCel.position = Point(bx, by)
+    cel = oldCel
+  else
+    cel = sprite:newCel(layer, frameNumber, full, Point(bx, by))
+  end
+
+  guideLayer = sprite:newLayer()
+  guideLayer.name = GUIDE_NAME
+  guideLayer.properties(KEY).guide = true
+  sprite:newCel(guideLayer, frameNumber, blankImage(sprite.width, sprite.height), Point(0, 0))
+
+  app.layer = layer
+end)
+
+-- An overlay writes pixels into a cel's image without undo information.
+-- It keeps a copy of the image so restoreOverlay() can put every pixel back.
+local function newOverlay(c, current)
+  local img = c.image
+  return { img = img, x = c.position.x, y = c.position.y, w = img.width, h = img.height,
+           mask = img.spec.transparentColor, base = img:clone(),
+           cur = current or {}, touched = {} }
+end
+
+local curveOv = newOverlay(cel, shown)
+local guideOv = newOverlay(guideLayer:cel(frameNumber))
+
+-- Key of a canvas pixel in an overlay, or nil if it's outside
+local function overlayKey(o, x, y)
+  local ix, iy = x - o.x, y - o.y
+  if ix < 0 or iy < 0 or ix >= o.w or iy >= o.h then return nil end
+  return iy * o.w + ix
+end
+
+-- Makes the overlay show exactly the pixels in `want` ({ [key] = pixel value })
+local function showOverlay(o, want)
+  local img, w = o.img, o.w
+  for k in pairs(o.cur) do
+    if want[k] == nil then
+      img:drawPixel(k % w, k // w, o.mask)
+      o.touched[k] = true
+    end
+  end
+  for k, v in pairs(want) do
+    if o.cur[k] ~= v then
+      img:drawPixel(k % w, k // w, v)
+      o.touched[k] = true
+    end
+  end
+  o.cur = want
+end
+
+local function restoreOverlay(o)
+  local img, base, w = o.img, o.base, o.w
+  for k in pairs(o.touched) do
+    local x, y = k % w, k // w
+    img:drawPixel(x, y, base:getPixel(x, y))
+  end
+  o.touched, o.cur = {}, {}
+end
 
 ------------------------------------------------------------------------
 -- Editor state
 
 local dlg
 local active, selNode = nil, nil   -- selected line and point
-local hover = nil                  -- what's under the mouse
-local drag = nil                   -- what's being dragged
-local mouse = { x = 0, y = 0 }
+local press = nil                  -- the drag in progress
 local syncing = false              -- true while updating the fields from code
 local undoStack, redoStack = {}, {}
 local lastMerge = nil
-local cursor = nil
-
-local view = { zoom = 1, x = 0, y = 0, w = 480, h = 360, fitted = false }
-local ZOOMS = { 1/16, 1/8, 1/4, 1/3, 1/2, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 48, 64 }
-local HIT = 6   -- how close (in screen pixels) the mouse must be to grab something
-
-local GUIDE = Color{ r = 0, g = 150, b = 255 }
-local GUIDE_LINE = Color{ r = 0, g = 150, b = 255, a = 150 }
-local WHITE = Color{ r = 255, g = 255, b = 255 }
-local DARK = Color{ r = 40, g = 40, b = 40 }
-local OUTSIDE = Color{ r = 96, g = 96, b = 96 }
-local CHECK_A = Color{ r = 204, g = 204, b = 204 }
-local CHECK_B = Color{ r = 153, g = 153, b = 153 }
-local STATUS_BG = Color{ r = 0, g = 0, b = 0, a = 170 }
-
-local HINT_NEW = "Click: start a new line"
-local HINT_ADD = "Click: add a point to the line (drag to bend)"
-local HINT_ANCHOR = "Drag: move   Right-click: delete   Double-click: round/sharp"
-local HINT_HANDLE = "Drag: bend (Alt: one side only)   Right-click: remove"
-local HINT_SEGMENT = "Click: add a point here   Drag: move the line"
-
-local function updatePreview()
-  previewImage:clear()
-  for _, p in ipairs(paths) do
-    local v = previewPixel(p)
-    plotPath(p, function(x, y) previewImage:drawPixel(x, y, v) end)
-  end
-end
+local finished = false
+local externalChange = false       -- something else changed the sprite
+local historyMoved = false         -- the undo history was moved by something else
+local askTimer, autoTimer, cleanupTimer
+local pendingCommand = nil         -- a command held back until the edit is applied
+local listeners = {}
+local oldDoubleClick = nil
 
 local function snapshot()
   return { data = serialize(paths), active = active, sel = selNode }
@@ -385,19 +545,6 @@ local function pushUndo(before)
   return true
 end
 
--- Runs fn as one editing step. Consecutive steps with the same mergeKey
--- (e.g. dragging the width slider) become a single undo step.
-local function edit(fn, mergeKey)
-  local before = nil
-  if not mergeKey or mergeKey ~= lastMerge then before = snapshot() end
-  fn()
-  if before then
-    lastMerge = pushUndo(before) and mergeKey or nil
-  end
-  updatePreview()
-  dlg:repaint()
-end
-
 local function syncFields()
   local p = paths[active]
   syncing = true
@@ -405,81 +552,30 @@ local function syncFields()
     dlg:modify{ id = "color", color = tableToColor(p.color) }
     dlg:modify{ id = "width", value = p.width }
     dlg:modify{ id = "pixelPerfect", selected = p.pixelPerfect }
-    dlg:modify{ id = "closed", selected = p.closed, enabled = true }
+    dlg:modify{ id = "closed", selected = p.closed }
     dlg:modify{ id = "styleSep", text = "Selected Line" }
   else
-    dlg:modify{ id = "closed", selected = false, enabled = false }
+    dlg:modify{ id = "closed", selected = false }
     dlg:modify{ id = "styleSep", text = "Next Line" }
   end
-  dlg:modify{ id = "deleteLine", enabled = p ~= nil }
   syncing = false
+end
+
+local function updateButtons()
+  local p = paths[active]
+  local hasPoint = p ~= nil and selNode ~= nil
+  dlg:modify{ id = "closed", enabled = p ~= nil }
+  dlg:modify{ id = "deleteLine", enabled = p ~= nil }
+  dlg:modify{ id = "deletePoint", enabled = hasPoint }
+  dlg:modify{ id = "roundSharp", enabled = hasPoint }
+  dlg:modify{ id = "undo", enabled = #undoStack > 0 }
+  dlg:modify{ id = "redo", enabled = #redoStack > 0 }
 end
 
 local function select(pi, ni)
   local changed = pi ~= active
   active, selNode = pi, ni
   if changed then syncFields() end
-end
-
-local function restore(s)
-  paths = parse(s.data)
-  active, selNode = s.active, s.sel
-  if not paths[active] then active, selNode = nil, nil end
-  if active and selNode and not paths[active].nodes[selNode] then selNode = nil end
-  lastMerge = nil
-  hover = nil
-  drag = nil
-  syncFields()
-  updatePreview()
-  dlg:repaint()
-end
-
-local function undo()
-  if #undoStack == 0 then return end
-  redoStack[#redoStack + 1] = snapshot()
-  restore(table.remove(undoStack))
-end
-
-local function redo()
-  if #redoStack == 0 then return end
-  undoStack[#undoStack + 1] = snapshot()
-  restore(table.remove(redoStack))
-end
-
-------------------------------------------------------------------------
--- View (zoom and scroll)
-
-local function toScreen(x, y)
-  return view.x + (x + 0.5) * view.zoom, view.y + (y + 0.5) * view.zoom
-end
-
-local function toSprite(sx, sy)
-  return (sx - view.x) / view.zoom - 0.5, (sy - view.y) / view.zoom - 0.5
-end
-
-local function fitView()
-  local margin = 24
-  local fit = math.min((view.w - margin * 2) / sprite.width, (view.h - margin * 2) / sprite.height)
-  local z = ZOOMS[1]
-  for _, v in ipairs(ZOOMS) do
-    if v <= fit then z = v end
-  end
-  view.zoom = z
-  view.x = round((view.w - sprite.width * z) / 2)
-  view.y = round((view.h - sprite.height * z) / 2)
-end
-
-local function zoomAt(sx, sy, dir)
-  local i = 1
-  for k, v in ipairs(ZOOMS) do
-    if v <= view.zoom then i = k end
-  end
-  local ni = math.max(1, math.min(#ZOOMS, i + dir))
-  if ni == i then return end
-  local fx, fy = (sx - view.x) / view.zoom, (sy - view.y) / view.zoom
-  view.zoom = ZOOMS[ni]
-  view.x = round(sx - fx * view.zoom)
-  view.y = round(sy - fy * view.zoom)
 end
 
 ------------------------------------------------------------------------
@@ -503,18 +599,10 @@ local function handlePos(n, side)
   return n.x + n.ox, n.y + n.oy
 end
 
-local function snap45(dx, dy)
-  local len = sqrt(dx * dx + dy * dy)
-  if len == 0 then return 0, 0 end
-  local step = math.pi / 4
-  local a = round(math.atan(dy, dx) / step) * step
-  return len * math.cos(a), len * math.sin(a)
-end
-
--- Moves one handle to (hx, hy). A smooth point turns the other handle too.
-local function moveHandle(n, side, hx, hy, alt, shift)
+-- Moves one handle to (hx, hy). A smooth point turns the other handle too,
+-- unless oneSide is set.
+local function moveHandle(n, side, hx, hy, oneSide)
   local dx, dy = hx - n.x, hy - n.y
-  if shift then dx, dy = snap45(dx, dy) end
   local ox, oy
   if side == "out" then
     n.ox, n.oy = dx, dy
@@ -523,7 +611,7 @@ local function moveHandle(n, side, hx, hy, alt, shift)
     n.ix, n.iy = dx, dy
     ox, oy = n.ox, n.oy
   end
-  if alt then
+  if oneSide then
     n.smooth = false
     return
   end
@@ -537,9 +625,8 @@ local function moveHandle(n, side, hx, hy, alt, shift)
 end
 
 -- Pulls out both handles from a point, pointing at (hx, hy)
-local function pullHandles(n, hx, hy, shift)
+local function pullHandles(n, hx, hy)
   local dx, dy = hx - n.x, hy - n.y
-  if shift then dx, dy = snap45(dx, dy) end
   n.ox, n.oy, n.ix, n.iy = dx, dy, -dx, -dy
   n.smooth = dx ~= 0 or dy ~= 0
 end
@@ -580,7 +667,7 @@ local function deleteNode(pi, ni)
   end
 end
 
--- Double-click: a point with handles becomes sharp, a sharp one becomes round
+-- A point with handles becomes sharp, a sharp one becomes round
 local function toggleRound(p, i)
   local n = p.nodes[i]
   if hasHandle(n, "in") or hasHandle(n, "out") then
@@ -606,452 +693,449 @@ local function toggleRound(p, i)
   n.smooth = dx ~= 0 or dy ~= 0
 end
 
--- Distance check between the mouse and a segment drawn on screen.
--- Returns the t of the closest point, or nil if it's too far.
-local function hitSegment(a, b, mx, my, tolerance)
-  local c1x, c1y = toScreen(a.x + a.ox, a.y + a.oy)
-  local c2x, c2y = toScreen(b.x + b.ix, b.y + b.iy)
-  local ax, ay = toScreen(a.x, a.y)
-  local bx, by = toScreen(b.x, b.y)
-  local len = dist(ax, ay, c1x, c1y) + dist(c1x, c1y, c2x, c2y) + dist(c2x, c2y, bx, by)
-  local steps = math.max(8, math.min(400, math.ceil(len / 6)))
-  local best, bestT = tolerance * tolerance, nil
-  local px, py = ax, ay
-  for i = 1, steps do
-    local qx, qy = toScreen(bezier(a, b, i / steps))
-    local dx, dy = qx - px, qy - py
-    local l2 = dx * dx + dy * dy
-    local u = 0
-    if l2 > 0 then u = math.max(0, math.min(1, ((mx - px) * dx + (my - py) * dy) / l2)) end
-    local d2 = (mx - px - u * dx) ^ 2 + (my - py - u * dy) ^ 2
-    if d2 <= best then best, bestT = d2, (i - 1 + u) / steps end
-    px, py = qx, qy
+------------------------------------------------------------------------
+-- Showing the lines on the canvas
+
+-- Calls fn(x, y, i) for each pixel of a straight line, i counting from 0
+local function linePixels(x0, y0, x1, y1, fn)
+  local dx, dy = abs(x1 - x0), abs(y1 - y0)
+  local sx, sy = x1 > x0 and 1 or -1, y1 > y0 and 1 or -1
+  local err, x, y, i = dx - dy, x0, y0, 0
+  while true do
+    fn(x, y, i)
+    if x == x1 and y == y1 then break end
+    local e2 = 2 * err
+    if e2 > -dy then err = err - dy; x = x + sx end
+    if e2 < dx then err = err + dx; y = y + sy end
+    i = i + 1
   end
-  return bestT
 end
 
--- Finds what's under the mouse: a handle, a point, or a line
-local function hitTest(mx, my)
-  local function near(x, y)
-    local sx, sy = toScreen(x, y)
-    return (sx - mx) ^ 2 + (sy - my) ^ 2 <= HIT * HIT
+local function guidePixels()
+  local want = {}
+  if not dlg.data.guides then return want end
+  local function put(x, y, v)
+    local k = overlayKey(guideOv, x, y)
+    if k then want[k] = v end
   end
-
-  -- Handles of the selected line (unless they overlap their point)
+  for pi, p in ipairs(paths) do
+    if pi ~= active then
+      for _, n in ipairs(p.nodes) do put(n.x, n.y, GUIDE_OTHER) end
+    end
+  end
   local p = paths[active]
   if p then
     for i, n in ipairs(p.nodes) do
-      local ax, ay = toScreen(n.x, n.y)
+      for _, side in ipairs({ "in", "out" }) do
+        if hasHandle(n, side) and handleUsed(p, i, side) then
+          local hx, hy = handlePos(n, side)
+          hx, hy = round(hx), round(hy)
+          -- Dotted line from the point to the end of the handle
+          linePixels(n.x, n.y, hx, hy, function(x, y, j)
+            if j % 2 == 0 then put(x, y, GUIDE_HANDLE) end
+          end)
+          put(hx, hy, GUIDE_HANDLE)
+        end
+      end
+    end
+    for i, n in ipairs(p.nodes) do
+      put(n.x, n.y, i == selNode and GUIDE_SELECTED or GUIDE_POINT)
+    end
+  end
+  return want
+end
+
+local function redraw()
+  local want = {}
+  for _, p in ipairs(paths) do
+    local v = outputPixel(p)
+    plotPath(p, function(x, y)
+      local k = overlayKey(curveOv, x, y)
+      if k then want[k] = v end
+    end)
+  end
+  showOverlay(curveOv, want)
+  showOverlay(guideOv, guidePixels())
+end
+
+-- Shows the lines on the canvas and updates the panel
+local function refresh()
+  redraw()
+  updateButtons()
+  app.refresh()
+end
+
+-- Runs fn as one editing step. Consecutive steps with the same mergeKey
+-- (e.g. dragging the width slider) become a single undo step.
+local function edit(fn, mergeKey)
+  local before = nil
+  if not mergeKey or mergeKey ~= lastMerge then before = snapshot() end
+  fn()
+  if before then
+    lastMerge = pushUndo(before) and mergeKey or nil
+  end
+  refresh()
+end
+
+local function restore(s)
+  paths = parse(s.data)
+  active, selNode = s.active, s.sel
+  if not paths[active] then active, selNode = nil, nil end
+  if active and selNode and not paths[active].nodes[selNode] then selNode = nil end
+  lastMerge, press = nil, nil
+  syncFields()
+  refresh()
+  askTimer:start()
+end
+
+local function undo()
+  if #undoStack == 0 then return end
+  redoStack[#redoStack + 1] = snapshot()
+  restore(table.remove(undoStack))
+end
+
+local function redo()
+  if #redoStack == 0 then return end
+  undoStack[#undoStack + 1] = snapshot()
+  restore(table.remove(redoStack))
+end
+
+local function deleteSelectedPoint()
+  if paths[active] and selNode then
+    edit(function() deleteNode(active, selNode) end)
+    askTimer:start()
+  end
+end
+
+------------------------------------------------------------------------
+-- Clicks and drags on the canvas
+
+-- How close (in sprite pixels) a click must be to grab something
+local function tolerance()
+  local ok, zoom = pcall(function() return editor.zoom end)
+  if not ok or type(zoom) ~= "number" or zoom <= 0 then zoom = 8 end
+  return math.max(0.5, HIT / zoom)
+end
+
+-- The point on a segment closest to (x, y): returns its t and the distance
+local function nearestOnSegment(a, b, x, y)
+  local len = dist(a.x, a.y, a.x + a.ox, a.y + a.oy)
+            + dist(a.x + a.ox, a.y + a.oy, b.x + b.ix, b.y + b.iy)
+            + dist(b.x + b.ix, b.y + b.iy, b.x, b.y)
+  local steps = math.max(8, math.min(2000, math.ceil(len * 2)))
+  local bestD, bestT = math.huge, 0
+  local px, py = a.x, a.y
+  for i = 1, steps do
+    local qx, qy = bezier(a, b, i / steps)
+    local dx, dy = qx - px, qy - py
+    local l2 = dx * dx + dy * dy
+    local u = 0
+    if l2 > 0 then u = math.max(0, math.min(1, ((x - px) * dx + (y - py) * dy) / l2)) end
+    local d = dist(x, y, px + u * dx, py + u * dy)
+    if d < bestD then bestD, bestT = d, (i - 1 + u) / steps end
+    px, py = qx, qy
+  end
+  return bestT, bestD
+end
+
+-- Finds what's at the pixel (x, y): a handle, a point, or a line
+local function hitTest(x, y)
+  local tol = tolerance()
+  local best, bestD = nil, math.huge
+  local function consider(d, hit)
+    if d <= tol and d < bestD then best, bestD = hit, d end
+  end
+
+  -- Handles of the selected line (unless they're on their own point)
+  local p = paths[active]
+  if p then
+    for i, n in ipairs(p.nodes) do
       for _, side in ipairs({ "out", "in" }) do
         if hasHandle(n, side) and handleUsed(p, i, side) then
           local hx, hy = handlePos(n, side)
-          local sx, sy = toScreen(hx, hy)
-          if (sx - ax) ^ 2 + (sy - ay) ^ 2 > HIT * HIT and near(hx, hy) then
-            return { kind = "handle", path = active, node = i, side = side }
+          if round(hx) ~= n.x or round(hy) ~= n.y then
+            consider(dist(x, y, hx, hy) + 0.01, { kind = "handle", path = active, node = i, side = side })
           end
         end
       end
     end
   end
 
-  -- Selected line first, then the others from top to bottom
-  local order = {}
-  if p then order[1] = active end
-  for i = #paths, 1, -1 do
-    if i ~= active then order[#order + 1] = i end
-  end
-
-  for _, pi in ipairs(order) do
-    for i, n in ipairs(paths[pi].nodes) do
-      if near(n.x, n.y) then return { kind = "anchor", path = pi, node = i } end
+  -- Points (the selected line wins a tie)
+  for pi, q in ipairs(paths) do
+    local bias = pi == active and 0 or 0.02
+    for i, n in ipairs(q.nodes) do
+      consider(dist(x, y, n.x, n.y) + bias, { kind = "anchor", path = pi, node = i })
     end
   end
+  if best then return best end
 
-  for _, pi in ipairs(order) do
-    local q = paths[pi]
-    local tolerance = math.max(5, q.width * view.zoom / 2 + 2)
+  -- Lines: a click on one of their pixels, or close to the curve
+  for pi, q in ipairs(paths) do
+    local onPixel = false
+    plotPath(q, function(px, py)
+      if px == x and py == y then onPixel = true end
+    end)
     for _, s in ipairs(segments(q)) do
-      local t = hitSegment(s[1], s[2], mx, my, tolerance)
-      if t then return { kind = "segment", path = pi, seg = s[3], t = t } end
-    end
-  end
-  return nil
-end
-
-local function setCursor(kind)
-  if not MouseCursor then return end
-  local c = MouseCursor.CROSSHAIR
-  if kind == "anchor" or kind == "handle" then
-    c = MouseCursor.MOVE
-  elseif kind == "segment" then
-    c = MouseCursor.POINTER
-  elseif kind == "pan" then
-    c = MouseCursor.GRABBING or MouseCursor.MOVE
-  end
-  if c ~= cursor then
-    cursor = c
-    dlg:modify{ id = "canvas", mousecursor = c }
-  end
-end
-
-------------------------------------------------------------------------
--- Painting the canvas
-
-local function box(gc, x, y, r, fill, stroke)
-  local rc = Rectangle(round(x) - r, round(y) - r, 2 * r + 1, 2 * r + 1)
-  gc.color = fill
-  gc:fillRect(rc)
-  gc.color = stroke
-  gc:strokeRect(rc)
-end
-
-local function diamond(gc, x, y, r, fill, stroke)
-  x, y = round(x) + 0.5, round(y) + 0.5
-  gc:beginPath()
-  gc:moveTo(x, y - r)
-  gc:lineTo(x + r, y)
-  gc:lineTo(x, y + r)
-  gc:lineTo(x - r, y)
-  gc:closePath()
-  gc.color = fill
-  gc:fill()
-  gc.color = stroke
-  gc:stroke()
-end
-
-local function strokePath(gc, p)
-  if #p.nodes < 2 then return end
-  gc:beginPath()
-  gc:moveTo(toScreen(p.nodes[1].x, p.nodes[1].y))
-  for _, s in ipairs(segments(p)) do
-    local a, b = s[1], s[2]
-    local c1x, c1y = toScreen(a.x + a.ox, a.y + a.oy)
-    local c2x, c2y = toScreen(b.x + b.ix, b.y + b.iy)
-    local ex, ey = toScreen(b.x, b.y)
-    gc:cubicTo(c1x, c1y, c2x, c2y, ex, ey)
-  end
-  gc:stroke()
-end
-
-local function drawCheckerboard(gc, x0, y0, x1, y1)
-  gc.color = CHECK_A
-  gc:fillRect(Rectangle(x0, y0, x1 - x0, y1 - y0))
-  gc.color = CHECK_B
-  local C = 8
-  for j = (y0 - view.y) // C, (y1 - 1 - view.y) // C do
-    local ry0 = math.max(y0, view.y + j * C)
-    local ry1 = math.min(y1, view.y + (j + 1) * C)
-    for i = (x0 - view.x) // C, (x1 - 1 - view.x) // C do
-      if (i + j) % 2 == 1 then
-        local rx0 = math.max(x0, view.x + i * C)
-        local rx1 = math.min(x1, view.x + (i + 1) * C)
-        gc:fillRect(Rectangle(rx0, ry0, rx1 - rx0, ry1 - ry0))
+      local t, d = nearestOnSegment(s[1], s[2], x, y)
+      if pi ~= active then d = d + 0.02 end
+      if (onPixel or d <= tol) and d < bestD then
+        best, bestD = { kind = "segment", path = pi, seg = s[3], t = t }, d
       end
     end
   end
+  return best
 end
 
-local function statusText()
-  local h = hover
-  if not h then
-    local p = paths[active]
-    if p and not p.closed then return HINT_ADD end
-    return HINT_NEW
-  elseif h.kind == "anchor" then
-    return HINT_ANCHOR
-  elseif h.kind == "handle" then
-    return HINT_HANDLE
-  end
-  return HINT_SEGMENT
-end
-
-local function paint(ev)
-  local gc = ev.context
-  view.w, view.h = gc.width, gc.height
-  if not view.fitted then
-    fitView()
-    view.fitted = true
-  end
-  local z = view.zoom
-
-  gc.color = OUTSIDE
-  gc:fillRect(Rectangle(0, 0, view.w, view.h))
-
-  -- Visible part of the sprite
-  local x0 = math.max(0, floor(-view.x / z))
-  local y0 = math.max(0, floor(-view.y / z))
-  local x1 = math.min(sprite.width, math.ceil((view.w - view.x) / z))
-  local y1 = math.min(sprite.height, math.ceil((view.h - view.y) / z))
-  if x1 > x0 and y1 > y0 then
-    local sx0, sy0 = round(view.x + x0 * z), round(view.y + y0 * z)
-    local sx1, sy1 = round(view.x + x1 * z), round(view.y + y1 * z)
-    drawCheckerboard(gc, math.max(sx0, 0), math.max(sy0, 0),
-                     math.min(sx1, view.w), math.min(sy1, view.h))
-    gc:drawImage(bgImage, x0, y0, x1 - x0, y1 - y0, sx0, sy0, sx1 - sx0, sy1 - sy0)
-    gc:drawImage(previewImage, x0, y0, x1 - x0, y1 - y0, sx0, sy0, sx1 - sx0, sy1 - sy0)
-  end
-
-  -- Outline of the selected line and the one under the mouse
-  gc.strokeWidth = 1
-  gc.antialias = true
-  gc.color = GUIDE_LINE
-  for pi, p in ipairs(paths) do
-    if pi == active or (hover and hover.path == pi) then strokePath(gc, p) end
-  end
-  gc.antialias = false
-
-  -- Points of the other lines
-  for pi, p in ipairs(paths) do
-    if pi ~= active then
-      for _, n in ipairs(p.nodes) do
-        local x, y = toScreen(n.x, n.y)
-        box(gc, x, y, 2, WHITE, DARK)
-      end
-    end
-  end
-
-  -- Points and handles of the selected line
+-- Adds a point to the end of the selected line, or starts a new line
+local function addPoint(x, y)
   local p = paths[active]
-  if p then
-    for i, n in ipairs(p.nodes) do
-      local ax, ay = toScreen(n.x, n.y)
-      for _, side in ipairs({ "in", "out" }) do
-        if hasHandle(n, side) and handleUsed(p, i, side) then
-          local hx, hy = toScreen(handlePos(n, side))
-          gc.color = GUIDE
-          gc:beginPath()
-          gc:moveTo(ax, ay)
-          gc:lineTo(hx, hy)
-          gc:stroke()
-          diamond(gc, hx, hy, 4, GUIDE, WHITE)
-        end
-      end
-    end
-    for i, n in ipairs(p.nodes) do
-      local x, y = toScreen(n.x, n.y)
-      if i == selNode then box(gc, x, y, 3, GUIDE, WHITE) else box(gc, x, y, 3, WHITE, GUIDE) end
-    end
+  if not p or p.closed then
+    local d = dlg.data
+    p = { color = colorToTable(d.color), width = d.width, pixelPerfect = d.pixelPerfect,
+          closed = false, nodes = {} }
+    paths[#paths + 1] = p
+    select(#paths, nil)
   end
-
-  -- Status bar: hint, pixel under the mouse and zoom
-  local text = statusText()
-  local mx, my = toSprite(mouse.x, mouse.y)
-  local info = string.format("%d, %d   %d%%", round(mx), round(my), round(z * 100))
-  local th = gc:measureText("Ag").height
-  local bh = th + 6
-  gc.color = STATUS_BG
-  gc:fillRect(Rectangle(0, view.h - bh, view.w, bh))
-  gc.color = WHITE
-  gc:fillText(text, 5, view.h - bh + 3)
-  local iw = gc:measureText(info).width
-  if gc:measureText(text).width + iw + 20 < view.w then
-    gc:fillText(info, view.w - iw - 5, view.h - bh + 3)
-  end
+  p.nodes[#p.nodes + 1] = { x = x, y = y, ix = 0, iy = 0, ox = 0, oy = 0, smooth = false }
+  selNode = #p.nodes
+  return { kind = "anchor", path = active, node = selNode }
 end
 
-------------------------------------------------------------------------
--- Mouse and keyboard
-
-local function onMouseDown(ev)
-  mouse.x, mouse.y = ev.x, ev.y
-  if ev.button == MouseButton.MIDDLE or (ev.button == MouseButton.LEFT and ev.spaceKey) then
-    drag = { kind = "pan", mx = ev.x, my = ev.y, vx = view.x, vy = view.y }
-    setCursor("pan")
-    return
-  end
-
-  local hit = hitTest(ev.x, ev.y)
-
-  if ev.button == MouseButton.RIGHT then
-    if hit and hit.kind == "anchor" then
-      edit(function() deleteNode(hit.path, hit.node) end)
-    elseif hit and hit.kind == "handle" then
-      edit(function()
-        local n = paths[hit.path].nodes[hit.node]
-        if hit.side == "in" then n.ix, n.iy = 0, 0 else n.ox, n.oy = 0, 0 end
-      end)
-    end
-    hover = hitTest(ev.x, ev.y)
-    dlg:repaint()
-    return
-  end
-  if ev.button ~= MouseButton.LEFT then return end
-
+-- The mouse button went down at (x, y): decide what the drag will do
+local function startGesture(x, y)
   lastMerge = nil
   local before = snapshot()
+  local hit = hitTest(x, y)
   if hit and hit.kind == "handle" then
     select(hit.path, hit.node)
-    drag = { kind = "handle", hit = hit, before = before }
+    local hx, hy = handlePos(paths[hit.path].nodes[hit.node], hit.side)
+    press = { kind = "handle", hit = hit, before = before, sx = x, sy = y, hx = hx, hy = hy }
   elseif hit and hit.kind == "anchor" then
     select(hit.path, hit.node)
     local n = paths[hit.path].nodes[hit.node]
-    drag = { kind = ev.altKey and "pull" or "anchor", hit = hit, before = before,
-             mx = ev.x, my = ev.y, x = n.x, y = n.y }
-  elseif hit and hit.kind == "segment" then
+    press = { kind = "anchor", hit = hit, before = before, sx = x, sy = y, x = n.x, y = n.y }
+  elseif hit then
     select(hit.path, nil)
     local orig = {}
     for i, n in ipairs(paths[hit.path].nodes) do orig[i] = { n.x, n.y } end
-    drag = { kind = "segment", hit = hit, before = before, mx = ev.x, my = ev.y, orig = orig }
+    press = { kind = "segment", hit = hit, before = before, sx = x, sy = y, orig = orig }
   else
-    -- Add a point to the end of the selected line, or start a new line
-    local p = paths[active]
-    if not p or p.closed then
-      local d = dlg.data
-      p = { color = colorToTable(d.color), width = d.width, pixelPerfect = d.pixelPerfect,
-            closed = false, nodes = {} }
-      paths[#paths + 1] = p
-      select(#paths, nil)
-    end
-    local x, y = toSprite(ev.x, ev.y)
-    p.nodes[#p.nodes + 1] = { x = round(x), y = round(y), ix = 0, iy = 0, ox = 0, oy = 0, smooth = false }
-    selNode = #p.nodes
-    hit = { kind = "anchor", path = active, node = selNode }
-    drag = { kind = "pull", hit = hit, before = before }
-    updatePreview()
+    press = { kind = "pull", hit = addPoint(x, y), before = before }
   end
-  hover = hit
-  dlg:repaint()
 end
 
-local function onMouseMove(ev)
-  mouse.x, mouse.y = ev.x, ev.y
-  local d = drag
-  if not d then
-    hover = hitTest(ev.x, ev.y)
-    setCursor(hover and hover.kind)
-    dlg:repaint()
-    return
-  end
-
-  if d.kind == "pan" then
-    view.x, view.y = round(d.vx + ev.x - d.mx), round(d.vy + ev.y - d.my)
-  elseif d.kind == "anchor" or d.kind == "segment" then
-    local dx = round((ev.x - d.mx) / view.zoom)
-    local dy = round((ev.y - d.my) / view.zoom)
-    if ev.shiftKey then
-      if abs(dx) >= abs(dy) then dy = 0 else dx = 0 end
-    end
-    if d.kind == "anchor" then
-      local n = paths[d.hit.path].nodes[d.hit.node]
-      n.x, n.y = d.x + dx, d.y + dy
-    else
-      -- Clicking a line adds a point; dragging it moves the whole line
-      if not d.moved and (ev.x - d.mx) ^ 2 + (ev.y - d.my) ^ 2 > 9 then d.moved = true end
-      if d.moved then
-        for i, n in ipairs(paths[d.hit.path].nodes) do
-          n.x, n.y = d.orig[i][1] + dx, d.orig[i][2] + dy
-        end
-      end
-    end
-    updatePreview()
+local function dragTo(x, y)
+  local d = press
+  local n = d.hit.node and paths[d.hit.path].nodes[d.hit.node]
+  if d.kind == "anchor" then
+    n.x, n.y = d.x + x - d.sx, d.y + y - d.sy
   elseif d.kind == "handle" then
-    local hx, hy = toSprite(ev.x, ev.y)
-    moveHandle(paths[d.hit.path].nodes[d.hit.node], d.hit.side, hx, hy, ev.altKey, ev.shiftKey)
-    updatePreview()
+    moveHandle(n, d.hit.side, d.hx + x - d.sx, d.hy + y - d.sy, dlg.data.oneSide)
   elseif d.kind == "pull" then
-    local n = paths[d.hit.path].nodes[d.hit.node]
-    local ax, ay = toScreen(n.x, n.y)
-    if (ev.x - ax) ^ 2 + (ev.y - ay) ^ 2 < 9 then
+    if x == n.x and y == n.y then
       n.ix, n.iy, n.ox, n.oy, n.smooth = 0, 0, 0, 0, false
     else
-      local hx, hy = toSprite(ev.x, ev.y)
-      pullHandles(n, hx, hy, ev.shiftKey)
+      pullHandles(n, x, y)
     end
-    updatePreview()
+  elseif d.kind == "segment" then
+    -- Clicking a line adds a point, dragging it moves the whole line
+    if x ~= d.sx or y ~= d.sy then d.moved = true end
+    if d.moved then
+      for i, m in ipairs(paths[d.hit.path].nodes) do
+        m.x, m.y = d.orig[i][1] + x - d.sx, d.orig[i][2] + y - d.sy
+      end
+    end
   end
-  dlg:repaint()
 end
 
-local function onMouseUp(ev)
-  local d = drag
-  if not d then return end
-  drag = nil
+local function endGesture(x, y, dragged)
+  local d = press
+  if dragged then dragTo(x, y) end
+  press = nil
   if d.kind == "segment" and not d.moved then
-    local ni = insertNode(paths[d.hit.path], d.hit.seg, d.hit.t)
-    select(d.hit.path, ni)
-    updatePreview()
+    select(d.hit.path, insertNode(paths[d.hit.path], d.hit.seg, d.hit.t))
   end
-  if d.before then pushUndo(d.before) end
-  hover = hitTest(ev.x, ev.y)
-  setCursor(hover and hover.kind)
-  dlg:repaint()
+  pushUndo(d.before)
+  refresh()
 end
 
-local function onDoubleClick(ev)
-  if ev.button ~= MouseButton.LEFT then return end
-  if drag and drag.kind ~= "pan" then drag = nil end
-  local hit = hitTest(ev.x, ev.y)
-  if hit and hit.kind == "anchor" then
-    select(hit.path, hit.node)
-    edit(function() toggleRound(paths[hit.path], hit.node) end)
-  end
+local ask
+
+-- While the button is held: called on every mouse move
+local function onChange(ev)
+  if finished then return end
+  local pt = ev.point
+  if not press then startGesture(pt.x, pt.y) end
+  dragTo(pt.x, pt.y)
+  redraw()
 end
 
-local function onWheel(ev)
-  local dir = 0
-  if ev.deltaY < 0 then dir = 1 elseif ev.deltaY > 0 then dir = -1 end
-  if dir ~= 0 then
-    zoomAt(ev.x, ev.y, dir)
-    hover = hitTest(ev.x, ev.y)
-    dlg:repaint()
+-- The button was released
+local function onClick(ev)
+  if finished then return end
+  local pt = ev.point
+  if press then
+    endGesture(pt.x, pt.y, true)
+  else
+    startGesture(pt.x, pt.y)
+    endGesture(pt.x, pt.y, false)
   end
+  -- askPoint() ends after each click, so ask again (it can't be done from here)
+  askTimer:start()
 end
 
-local ARROWS = { ArrowLeft = { -1, 0 }, ArrowRight = { 1, 0 }, ArrowUp = { 0, -1 }, ArrowDown = { 0, 1 } }
+-- Esc cancels the drag, or deselects the line
+local function onCancel()
+  if finished then return end
+  if press then
+    local before = press.before
+    press = nil
+    restore(before)
+  elseif active then
+    select(nil, nil)
+    refresh()
+  end
+  askTimer:start()
+end
 
-local function onKeyDown(ev)
-  local code = ev.code
-  local ctrl = ev.ctrlKey or ev.metaKey
-  if ctrl and code == "KeyZ" then
-    if ev.shiftKey then redo() else undo() end
-    ev:stopPropagation()
-  elseif ctrl and code == "KeyY" then
-    redo()
-    ev:stopPropagation()
-  elseif code == "Escape" and (drag or paths[active]) then
-    -- Esc cancels the drag or deselects the line before it closes the window
-    local d = drag
-    drag = nil
-    if d and d.before then
-      restore(d.before)
+ask = function()
+  if finished or app.editor ~= editor then return end
+  local p = paths[active]
+  local n = p and selNode and p.nodes[selNode]
+  -- `point` outlines the selected point
+  editor:askPoint{ title = HINT, point = n and Point(n.x, n.y) or nil,
+                   onchange = onChange, onclick = onClick, oncancel = onCancel }
+end
+
+------------------------------------------------------------------------
+-- Ending the session
+
+local function finish(apply, canUndo, fromPanelClose)
+  if finished then return end
+  finished = true
+  press = nil
+  rawset(_G, SESSION, nil)
+  askTimer:stop()
+  autoTimer:stop()
+  -- Event listeners can't be removed while an event is being sent
+  cleanupTimer:start()
+  if oldDoubleClick ~= nil then
+    pcall(function() app.preferences.selection.doubleclick_select_tile = oldDoubleClick end)
+  end
+  pcall(function() rawset(_G, PANEL_BOUNDS, dlg.bounds) end)
+
+  local ok, err = pcall(function()
+    if not pcall(function() return sprite.width end) then return end   -- the sprite was closed
+
+    -- Work on the edited sprite even if another one is active now
+    local keepSprite, keepFrame = app.sprite, app.frame
+    local switched = keepSprite ~= sprite
+    if switched then app.sprite = sprite end
+    if app.editor == editor then editor:cancel() end
+
+    -- Put the pixels back as they were right after the setup
+    pcall(restoreOverlay, curveOv)
+    pcall(restoreOverlay, guideOv)
+
+    if historyMoved then
+      -- The undo history was moved (e.g. in the Undo History panel): leave it as it is
+      app.alert{ title = TITLE, text = "The undo history was changed, so the curve edit has ended." }
     else
-      select(nil, nil)
-      hover = nil
-      dlg:repaint()
+      local result = serialize(paths)
+      local changed = apply and result ~= original
+
+      -- Undo the setup step if it's still the last thing in the history
+      local undone = false
+      if canUndo and not externalChange then
+        app.command.Undo()
+        -- Check that it worked: the guide layer is gone again
+        undone = true
+        for _, l in ipairs(sprite.layers) do
+          if l == guideLayer then undone = false end
+        end
+      end
+
+      if not undone or changed then
+        app.transaction(TITLE, function()
+          -- After undoing the setup, the layer it made is gone again
+          local target = layer
+          if undone then target = curveLayer end
+          if not undone then
+            sprite:deleteLayer(guideLayer)
+            if not changed then
+              -- Cancel: take back what the setup did
+              if createdLayer then
+                sprite:deleteLayer(layer)
+              elseif oldCel then
+                cel.image = oldImage
+                cel.position = oldPos
+              else
+                sprite:deleteCel(cel)
+              end
+              return
+            end
+            if createdLayer and #paths == 0 then
+              sprite:deleteLayer(layer)
+              return
+            end
+          end
+
+          if not target then
+            target = sprite:newLayer()
+            target.name = newLayerName()
+            if src then
+              target.parent = src.parent
+              target.stackIndex = src.stackIndex + 1
+            end
+            target.properties(KEY).curve = true
+          end
+          local c = target:cel(frameNumber)
+          if #paths == 0 then
+            if c then sprite:deleteCel(c) end
+          else
+            local img, pos = renderPaths(paths)
+            if c then
+              c.image = img
+              c.position = pos
+            else
+              c = sprite:newCel(target, frameNumber, img, pos)
+            end
+            c.properties(KEY, { version = 1, x = pos.x, y = pos.y, paths = result })
+          end
+          app.layer = target
+        end)
+      end
     end
-    ev:stopPropagation()
-  elseif (code == "Delete" or code == "Backspace") and paths[active] and selNode then
-    edit(function() deleteNode(active, selNode) end)
-    ev:stopPropagation()
-  elseif ARROWS[code] and paths[active] and selNode then
-    -- Arrow keys nudge the selected point by 1 pixel
-    local n = paths[active].nodes[selNode]
-    edit(function()
-      n.x, n.y = n.x + ARROWS[code][1], n.y + ARROWS[code][2]
-    end, "nudge" .. active .. ":" .. selNode)
-    ev:stopPropagation()
+
+    -- Go back to where the user was
+    if switched then
+      app.sprite = keepSprite
+    elseif keepFrame and keepFrame.frameNumber ~= frameNumber then
+      app.frame = keepFrame
+    end
+  end)
+
+  if not fromPanelClose then dlg:close() end
+  app.refresh()
+  if not ok then
+    app.alert{ title = TITLE, text = { "Something went wrong while ending the curve edit:", tostring(err) } }
   end
 end
 
 ------------------------------------------------------------------------
--- Dialog
+-- Panel
 
 local function changeStyle(key, apply)
-  if syncing then return end
+  if syncing or finished then return end
   local p = paths[active]
   if p then edit(function() apply(p) end, key .. active) end
 end
 
-dlg = Dialog{ title = TITLE }
-dlg:canvas{ id = "canvas", width = 480, height = 360,
-            onpaint = paint,
-            onmousedown = onMouseDown,
-            onmousemove = onMouseMove,
-            onmouseup = onMouseUp,
-            ondblclick = onDoubleClick,
-            onwheel = onWheel,
-            onkeydown = onKeyDown }
-   :label{ text = "Wheel: zoom   Middle-drag / Space+drag: scroll   Shift: straight   Ctrl+Z: undo" }
+dlg = Dialog{ title = TITLE, onclose = function() finish(true, true, true) end }
+dlg:label{ text = "Click on the canvas to add points, drag points or handles to bend." }
+   :newrow()
+   :label{ text = "Click a line to add a point there. Del: delete the point." }
    :separator{ id = "styleSep", text = "Next Line" }
    :color{ id = "color", label = "Color", color = app.fgColor,
            onchange = function()
@@ -1069,84 +1153,126 @@ dlg:canvas{ id = "canvas", width = 480, height = 360,
            onclick = function()
              changeStyle("closed", function(p) p.closed = dlg.data.closed end)
            end }
+   :check{ id = "oneSide", label = "", text = "Move one handle only", selected = false }
+   :check{ id = "guides", text = "Show guides", selected = true,
+           onclick = function() if not finished then refresh() end end }
+   :separator{}
    :button{ id = "newLine", text = "New Line",
             onclick = function()
+              if finished then return end
               select(nil, nil)
-              hover = nil
-              dlg:repaint()
+              refresh()
+              askTimer:start()
             end }
    :button{ id = "deleteLine", text = "Delete Line",
             onclick = function()
-              if not paths[active] then return end
+              if finished or not paths[active] then return end
               local pi = active
               edit(function()
                 table.remove(paths, pi)
                 select(nil, nil)
               end)
+              askTimer:start()
             end }
-   :button{ id = "undo", text = "Undo", onclick = undo }
-   :button{ id = "fit", text = "Fit",
+   :newrow()
+   :button{ id = "deletePoint", text = "Delete Point",
+            onclick = function() if not finished then deleteSelectedPoint() end end }
+   :button{ id = "roundSharp", text = "Round/Sharp",
             onclick = function()
-              fitView()
-              dlg:repaint()
+              if finished or not (paths[active] and selNode) then return end
+              local p, i = paths[active], selNode
+              edit(function() toggleRound(p, i) end)
             end }
+   :newrow()
+   :button{ id = "undo", text = "Undo", onclick = function() if not finished then undo() end end }
+   :button{ id = "redo", text = "Redo", onclick = function() if not finished then redo() end end }
    :separator{}
-   :button{ id = "ok", text = "Apply", focus = true }
-   :button{ id = "cancel", text = "Cancel" }
-
-syncFields()
-updatePreview()
-dlg:show()
-
-if not dlg.data.ok then return end
+   :button{ id = "ok", text = "Apply", focus = true, onclick = function() finish(true, true) end }
+   :button{ id = "cancel", text = "Cancel", onclick = function() finish(false, true) end }
 
 ------------------------------------------------------------------------
--- Apply
+-- Start
 
-local result = serialize(paths)
-if result == original then return end
+askTimer = Timer{ interval = 0.01, ontick = function()
+  askTimer:stop()
+  ask()
+end }
 
-local function newLayerName()
-  local used = {}
-  local function scan(layers)
-    for _, l in ipairs(layers) do
-      used[l.name] = true
-      if l.isGroup then scan(l.layers) end
-    end
-  end
-  scan(sprite.layers)
-  local n = 1
-  while used["Curve " .. n] do n = n + 1 end
-  return "Curve " .. n
+-- Applies the edit when the user moves to another frame or sprite, or
+-- something else changes the sprite
+autoTimer = Timer{ interval = 0.01, ontick = function()
+  autoTimer:stop()
+  finish(true, true)
+  local cmd = pendingCommand
+  pendingCommand = nil
+  if cmd and app.command[cmd.name] then app.command[cmd.name](cmd.params) end
+end }
+
+cleanupTimer = Timer{ interval = 0.01, ontick = function()
+  cleanupTimer:stop()
+  for _, l in ipairs(listeners) do pcall(function() l[1]:off(l[2]) end) end
+  listeners = {}
+end }
+
+local function listen(events, name, fn)
+  listeners[#listeners + 1] = { events, events:on(name, fn) }
 end
 
-app.transaction(TITLE, function()
-  local layer = curveLayer
-  if not layer then
-    layer = sprite:newLayer()
-    layer.name = newLayerName()
-    if src then
-      layer.parent = src.parent
-      layer.stackIndex = src.stackIndex + 1
-    end
-    layer.properties(KEY).curve = true
+listen(app.events, "beforecommand", function(ev)
+  if finished then return end
+  local here = app.sprite == sprite
+  if here and ev.name == "Undo" then
+    undo()
+    ev.stopPropagation()
+  elseif here and ev.name == "Redo" then
+    redo()
+    ev.stopPropagation()
+  elseif here and ev.name == "Clear" then
+    -- Delete/Backspace deletes the selected point instead of clearing pixels
+    deleteSelectedPoint()
+    ev.stopPropagation()
+  elseif not VIEW_COMMANDS[ev.name] then
+    -- Hold the command back, apply the edit, then run the command again.
+    -- (Applying right here would leave the setup step in the undo history.)
+    if not pendingCommand then pendingCommand = { name = ev.name, params = ev.params } end
+    ev.stopPropagation()
+    autoTimer:start()
   end
-
-  local cel = layer:cel(frameNumber)
-  if #paths == 0 then
-    if cel then sprite:deleteCel(cel) end
-  else
-    local img, pos = renderPaths(paths)
-    if cel then
-      cel.image = img
-      cel.position = pos
-    else
-      cel = sprite:newCel(layer, frameNumber, img, pos)
-    end
-    cel.properties(KEY, { version = 1, x = pos.x, y = pos.y, paths = result })
-  end
-
-  app.layer = layer
 end)
 
-app.refresh()
+listen(app.events, "sitechange", function()
+  if finished then return end
+  if app.sprite ~= sprite or not app.frame or app.frame.frameNumber ~= frameNumber then
+    autoTimer:start()
+  end
+end)
+
+listen(sprite.events, "change", function(ev)
+  if finished then return end
+  externalChange = true
+  if ev.fromUndo then historyMoved = true end
+  autoTimer:start()
+end)
+
+-- A quick second click would select a grid tile (and never reach the script)
+pcall(function()
+  oldDoubleClick = app.preferences.selection.doubleclick_select_tile
+  app.preferences.selection.doubleclick_select_tile = false
+end)
+
+rawset(_G, SESSION, { finish = finish })
+
+syncFields()
+dlg:show{ wait = false }
+
+-- Keep the panel out of the way: where it was last time, or at the right edge
+local b = dlg.bounds
+local saved = rawget(_G, PANEL_BOUNDS)
+if saved then
+  dlg.bounds = Rectangle(saved.x, saved.y, b.width, b.height)
+elseif app.window then
+  dlg.bounds = Rectangle(math.max(0, app.window.width - b.width - 24), 72, b.width, b.height)
+end
+
+refresh()
+ask()

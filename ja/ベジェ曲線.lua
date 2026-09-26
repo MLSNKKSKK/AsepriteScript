@@ -1,15 +1,17 @@
--- ベジェ曲線で、あとから編集できる線を引く
--- ・編集ウィンドウで点を置き、ハンドルをドラッグして曲げる。線は選択中のレイヤーの
---   すぐ上の「曲線レイヤー」に描かれる
--- ・曲線レイヤーを選んでもう一度実行すると、点の移動・曲げ具合・色・太さの変更、
---   線の追加や削除ができる
+-- ベジェ曲線で、キャンバス上で直接、あとから編集できる線を引く
+-- ・キャンバスをクリックして点を追加し、点やハンドルをドラッグして曲げる。
+--   色・太さ・確定/キャンセルのボタンは小さなパネルにある
+-- ・線は選択中のレイヤーのすぐ上の「曲線レイヤー」に描かれる。
+--   曲線レイヤーを選んでもう一度実行すると、線を編集できる
 -- ・曲線のデータはセルに保存されるので、.aseprite ファイルに残る。
 --   フレームごとに別の線を持てる。確定は1回の Ctrl+Z で元に戻せる
 
 local KEY = "asepritescript/bezier-curve"
 local TITLE = "ベジェ曲線"
+local SESSION = KEY .. "/session"   -- 編集中だけ設定するグローバル
+local PANEL_BOUNDS = KEY .. "/panel"  -- 前回のパネルの位置
 
-if not app.apiVersion or app.apiVersion < 21 then
+if not app.apiVersion or app.apiVersion < 24 then
   app.alert("このスクリプトには Aseprite v1.3 以降が必要です。")
   return
 end
@@ -17,14 +19,36 @@ end
 -- 編集には画面が必要なので、UI なしのときは何もしない
 if not app.isUIAvailable then return end
 
+-- 同時に編集できるのは1つだけ
+local running = rawget(_G, SESSION)
+if running then
+  local r = app.alert{ title = TITLE,
+    text = "すでにベジェ曲線を編集中です。先にパネルで確定かキャンセルをしてください。",
+    buttons = { "OK", "今すぐ確定する" } }
+  if r == 2 then
+    pcall(running.finish, true, false)
+    rawset(_G, SESSION, nil)
+  end
+  return
+end
+
 local sprite = app.sprite
 if not sprite then
   app.alert("スプライトが開かれていません。")
   return
 end
 
+local editor = app.editor
+if not editor or editor.sprite ~= sprite then
+  app.alert("スプライトを編集画面に表示してから、もう一度実行してください。")
+  return
+end
+
 local frameNumber = app.frame and app.frame.frameNumber or 1
 local src = app.layer
+
+-- (強制終了などで)残った一時的なガイドレイヤーには描かない
+if src and src.properties(KEY).guide == true then src = nil end
 
 local curveLayer = nil
 if src and src.isImage and not src.isTilemap and src.properties(KEY).curve == true then
@@ -237,21 +261,6 @@ local function outputPixel(p)
   return pc.rgba(c.r, c.g, c.b, c.a)
 end
 
--- 編集ウィンドウのプレビューで使う RGB のピクセル値
-local function previewPixel(p)
-  local c = p.color
-  if sprite.colorMode == ColorMode.INDEXED then
-    local pal = sprite.palettes[1]
-    if c.index == sprite.transparentColor or c.index < 0 or c.index >= #pal then return 0 end
-    local pcol = pal:getColor(c.index)
-    return pc.rgba(pcol.red, pcol.green, pcol.blue, pcol.alpha)
-  elseif sprite.colorMode == ColorMode.GRAY then
-    local g = grayOf(c)
-    return pc.rgba(g, g, g, c.a)
-  end
-  return pc.rgba(c.r, c.g, c.b, c.a)
-end
-
 -- すべての線を、線の範囲ぴったりの新しい画像に描く。
 -- 画像と、そのキャンバス上の位置を返す。
 local function renderPaths(paths)
@@ -321,55 +330,204 @@ if oldCel then
   end
 end
 
--- 曲線レイヤーを除いた、今のスプライトの見た目
-local bgImage = Image(sprite.width, sprite.height, ColorMode.RGB)
-do
-  local wasVisible = curveLayer and curveLayer.isVisible
-  if curveLayer then curveLayer.isVisible = false end
-  bgImage:drawSprite(sprite, frameNumber, Point(0, 0))
-  if curveLayer then curveLayer.isVisible = wasVisible end
+------------------------------------------------------------------------
+-- 編集セッション
+--
+-- スクリプトはキャンバスの上に補助線を描けない。そのため編集中は、線を曲線
+-- レイヤーに、点とハンドルを一番上の一時的なガイドレイヤーに直接描く。これらの
+-- ピクセルは元に戻す情報を作らずに書き込み、ほかの操作がスプライトに触れる前に
+-- 元どおりに戻す。レイヤーの準備は1回分の履歴になるが、終わるときにそれを
+-- 元に戻すので、履歴には最終的な結果だけが残る。
+
+local GUIDE_NAME = "ベジェ曲線のガイド(編集中)"
+local HINT = "ベジェ曲線: クリックで点を追加、点やハンドルをドラッグで編集"
+local HIT = 6   -- どこまで近ければつかめるか(画面のピクセル数)
+
+-- 表示だけを変えるコマンド。それ以外のコマンドは、先に編集を確定してから実行する
+local VIEW_COMMANDS = {}
+for _, name in ipairs{
+  "About", "AdvancedMode", "ChangeBrush", "ChangeColor", "ContiguousFill", "Eyedropper",
+  "FitScreen", "FullscreenMode", "FullscreenPreview", "GotoNextLayer", "GotoPreviousLayer",
+  "KeyboardShortcuts", "Options", "PixelPerfectMode", "Refresh", "Screenshot", "Scroll",
+  "ScrollCenter", "SetColorSelector", "SetInkType", "SetPaletteEntrySize", "SetSameInk",
+  "ShowAutoGuides", "ShowBrushPreview", "ShowBrushPreviewInPreview", "ShowExtras", "ShowGrid",
+  "ShowLayerEdges", "ShowMenu", "ShowOnionSkin", "ShowPixelGrid", "ShowSelectionEdges",
+  "ShowSlices", "ShowTileNumbers", "SnapToGrid", "SwapCheckerboardColors", "SwitchColors",
+  "SymmetryMode", "TiledMode", "Timeline", "ToggleOtherLayersOpacity", "TogglePreview",
+  "ToggleTilesMode", "ToggleTimelineThumbnails", "ToggleWorkspaceLayout", "Zoom",
+} do
+  VIEW_COMMANDS[name] = true
 end
-local previewImage = Image(sprite.width, sprite.height, ColorMode.RGB)
+
+local function newLayerName()
+  local used = {}
+  local function scan(layers)
+    for _, l in ipairs(layers) do
+      used[l.name] = true
+      if l.isGroup then scan(l.layers) end
+    end
+  end
+  scan(sprite.layers)
+  local n = 1
+  while used["曲線 " .. n] do n = n + 1 end
+  return "曲線 " .. n
+end
+
+local function blankImage(w, h)
+  local img = Image(ImageSpec{ width = w, height = h,
+    colorMode = sprite.colorMode, transparentColor = sprite.transparentColor })
+  img:clear()
+  return img
+end
+
+-- ガイドの色の、スプライトのカラーモードでのピクセル値
+local function guidePixel(r, g, b)
+  if sprite.colorMode == ColorMode.INDEXED then
+    -- パレットのいちばん近い色
+    local pal = sprite.palettes[1]
+    local best, bestD = 0, math.huge
+    for i = 0, #pal - 1 do
+      if i ~= sprite.transparentColor then
+        local c = pal:getColor(i)
+        local d = (c.red - r) ^ 2 + (c.green - g) ^ 2 + (c.blue - b) ^ 2
+        if d < bestD then best, bestD = i, d end
+      end
+    end
+    return best
+  elseif sprite.colorMode == ColorMode.GRAY then
+    return pc.graya(grayOf{ r = r, g = g, b = b }, 255)
+  end
+  return pc.rgba(r, g, b, 255)
+end
+
+local GUIDE_POINT = guidePixel(255, 0, 200)      -- 選択中の線の点
+local GUIDE_SELECTED = guidePixel(255, 230, 0)   -- 選択中の点
+local GUIDE_HANDLE = guidePixel(0, 200, 255)     -- ハンドル
+local GUIDE_OTHER = guidePixel(150, 70, 220)     -- ほかの線の点
+
+-- 準備: キャンバス全体をおおうセル(絵は今までと同じ)を持つ曲線レイヤーと、
+-- 一番上のガイドレイヤーを用意する
+
+local createdLayer = not curveLayer
+local layer = curveLayer
+local cel, guideLayer
+local oldImage = oldCel and oldCel.image:clone()
+local oldPos = oldCel and oldCel.position
+
+-- 新しいセルは、キャンバスと元のセルの両方をおおう
+local bx, by, bw, bh = 0, 0, sprite.width, sprite.height
+if oldCel then
+  local b = oldCel.bounds
+  local x2 = math.max(sprite.width, b.x + b.width)
+  local y2 = math.max(sprite.height, b.y + b.height)
+  bx, by = math.min(0, b.x), math.min(0, b.y)
+  bw, bh = x2 - bx, y2 - by
+end
+local shown = {}   -- そのセルの透明でないピクセル
+
+app.transaction(TITLE, function()
+  local stale = {}
+  for _, l in ipairs(sprite.layers) do
+    if l.properties(KEY).guide == true then stale[#stale + 1] = l end
+  end
+  for _, l in ipairs(stale) do sprite:deleteLayer(l) end
+
+  if not layer then
+    layer = sprite:newLayer()
+    layer.name = newLayerName()
+    if src then
+      layer.parent = src.parent
+      layer.stackIndex = src.stackIndex + 1
+    end
+    layer.properties(KEY).curve = true
+  end
+
+  local full = blankImage(bw, bh)
+  if oldCel then
+    local mask = full.spec.transparentColor
+    for it in oldImage:pixels() do
+      local v = it()
+      local ix, iy = it.x + oldPos.x - bx, it.y + oldPos.y - by
+      full:drawPixel(ix, iy, v)
+      if v ~= mask then shown[iy * bw + ix] = v end
+    end
+    oldCel.image = full
+    oldCel.position = Point(bx, by)
+    cel = oldCel
+  else
+    cel = sprite:newCel(layer, frameNumber, full, Point(bx, by))
+  end
+
+  guideLayer = sprite:newLayer()
+  guideLayer.name = GUIDE_NAME
+  guideLayer.properties(KEY).guide = true
+  sprite:newCel(guideLayer, frameNumber, blankImage(sprite.width, sprite.height), Point(0, 0))
+
+  app.layer = layer
+end)
+
+-- overlay は、元に戻す情報を作らずにセルの画像へピクセルを書き込む。
+-- 画像のコピーを持っていて、restoreOverlay() ですべてのピクセルを元に戻せる。
+local function newOverlay(c, current)
+  local img = c.image
+  return { img = img, x = c.position.x, y = c.position.y, w = img.width, h = img.height,
+           mask = img.spec.transparentColor, base = img:clone(),
+           cur = current or {}, touched = {} }
+end
+
+local curveOv = newOverlay(cel, shown)
+local guideOv = newOverlay(guideLayer:cel(frameNumber))
+
+-- キャンバスのピクセルの overlay でのキー。範囲外なら nil
+local function overlayKey(o, x, y)
+  local ix, iy = x - o.x, y - o.y
+  if ix < 0 or iy < 0 or ix >= o.w or iy >= o.h then return nil end
+  return iy * o.w + ix
+end
+
+-- overlay に `want` ({ [キー] = ピクセル値 }) のピクセルだけを表示させる
+local function showOverlay(o, want)
+  local img, w = o.img, o.w
+  for k in pairs(o.cur) do
+    if want[k] == nil then
+      img:drawPixel(k % w, k // w, o.mask)
+      o.touched[k] = true
+    end
+  end
+  for k, v in pairs(want) do
+    if o.cur[k] ~= v then
+      img:drawPixel(k % w, k // w, v)
+      o.touched[k] = true
+    end
+  end
+  o.cur = want
+end
+
+local function restoreOverlay(o)
+  local img, base, w = o.img, o.base, o.w
+  for k in pairs(o.touched) do
+    local x, y = k % w, k // w
+    img:drawPixel(x, y, base:getPixel(x, y))
+  end
+  o.touched, o.cur = {}, {}
+end
 
 ------------------------------------------------------------------------
 -- 編集の状態
 
 local dlg
 local active, selNode = nil, nil   -- 選択中の線と点
-local hover = nil                  -- マウスの下にあるもの
-local drag = nil                   -- ドラッグ中のもの
-local mouse = { x = 0, y = 0 }
+local press = nil                  -- ドラッグ中の操作
 local syncing = false              -- 入力欄をコードから更新している間は true
 local undoStack, redoStack = {}, {}
 local lastMerge = nil
-local cursor = nil
-
-local view = { zoom = 1, x = 0, y = 0, w = 480, h = 360, fitted = false }
-local ZOOMS = { 1/16, 1/8, 1/4, 1/3, 1/2, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 48, 64 }
-local HIT = 6   -- どこまで近づけばつかめるか(画面のピクセル数)
-
-local GUIDE = Color{ r = 0, g = 150, b = 255 }
-local GUIDE_LINE = Color{ r = 0, g = 150, b = 255, a = 150 }
-local WHITE = Color{ r = 255, g = 255, b = 255 }
-local DARK = Color{ r = 40, g = 40, b = 40 }
-local OUTSIDE = Color{ r = 96, g = 96, b = 96 }
-local CHECK_A = Color{ r = 204, g = 204, b = 204 }
-local CHECK_B = Color{ r = 153, g = 153, b = 153 }
-local STATUS_BG = Color{ r = 0, g = 0, b = 0, a = 170 }
-
-local HINT_NEW = "クリック: 新しい線を始める"
-local HINT_ADD = "クリック: 線に点を追加(ドラッグで曲げる)"
-local HINT_ANCHOR = "ドラッグ: 移動  右クリック: 削除  ダブルクリック: 丸/角"
-local HINT_HANDLE = "ドラッグ: 曲げる(Alt: 片側だけ)  右クリック: 消す"
-local HINT_SEGMENT = "クリック: ここに点を追加  ドラッグ: 線ごと移動"
-
-local function updatePreview()
-  previewImage:clear()
-  for _, p in ipairs(paths) do
-    local v = previewPixel(p)
-    plotPath(p, function(x, y) previewImage:drawPixel(x, y, v) end)
-  end
-end
+local finished = false
+local externalChange = false       -- ほかの操作がスプライトを変えた
+local historyMoved = false         -- ほかの操作で元に戻す履歴が動いた
+local askTimer, autoTimer, cleanupTimer
+local pendingCommand = nil         -- 編集を確定するまで待たせているコマンド
+local listeners = {}
+local oldDoubleClick = nil
 
 local function snapshot()
   return { data = serialize(paths), active = active, sel = selNode }
@@ -383,19 +541,6 @@ local function pushUndo(before)
   return true
 end
 
--- fn を1回の編集として実行する。同じ mergeKey の編集が続いたとき
--- (太さのスライダーを動かしている間など)は、まとめて1回で元に戻す。
-local function edit(fn, mergeKey)
-  local before = nil
-  if not mergeKey or mergeKey ~= lastMerge then before = snapshot() end
-  fn()
-  if before then
-    lastMerge = pushUndo(before) and mergeKey or nil
-  end
-  updatePreview()
-  dlg:repaint()
-end
-
 local function syncFields()
   local p = paths[active]
   syncing = true
@@ -403,81 +548,30 @@ local function syncFields()
     dlg:modify{ id = "color", color = tableToColor(p.color) }
     dlg:modify{ id = "width", value = p.width }
     dlg:modify{ id = "pixelPerfect", selected = p.pixelPerfect }
-    dlg:modify{ id = "closed", selected = p.closed, enabled = true }
+    dlg:modify{ id = "closed", selected = p.closed }
     dlg:modify{ id = "styleSep", text = "選択中の線" }
   else
-    dlg:modify{ id = "closed", selected = false, enabled = false }
+    dlg:modify{ id = "closed", selected = false }
     dlg:modify{ id = "styleSep", text = "次に描く線" }
   end
-  dlg:modify{ id = "deleteLine", enabled = p ~= nil }
   syncing = false
+end
+
+local function updateButtons()
+  local p = paths[active]
+  local hasPoint = p ~= nil and selNode ~= nil
+  dlg:modify{ id = "closed", enabled = p ~= nil }
+  dlg:modify{ id = "deleteLine", enabled = p ~= nil }
+  dlg:modify{ id = "deletePoint", enabled = hasPoint }
+  dlg:modify{ id = "roundSharp", enabled = hasPoint }
+  dlg:modify{ id = "undo", enabled = #undoStack > 0 }
+  dlg:modify{ id = "redo", enabled = #redoStack > 0 }
 end
 
 local function select(pi, ni)
   local changed = pi ~= active
   active, selNode = pi, ni
   if changed then syncFields() end
-end
-
-local function restore(s)
-  paths = parse(s.data)
-  active, selNode = s.active, s.sel
-  if not paths[active] then active, selNode = nil, nil end
-  if active and selNode and not paths[active].nodes[selNode] then selNode = nil end
-  lastMerge = nil
-  hover = nil
-  drag = nil
-  syncFields()
-  updatePreview()
-  dlg:repaint()
-end
-
-local function undo()
-  if #undoStack == 0 then return end
-  redoStack[#redoStack + 1] = snapshot()
-  restore(table.remove(undoStack))
-end
-
-local function redo()
-  if #redoStack == 0 then return end
-  undoStack[#undoStack + 1] = snapshot()
-  restore(table.remove(redoStack))
-end
-
-------------------------------------------------------------------------
--- 表示(拡大縮小とスクロール)
-
-local function toScreen(x, y)
-  return view.x + (x + 0.5) * view.zoom, view.y + (y + 0.5) * view.zoom
-end
-
-local function toSprite(sx, sy)
-  return (sx - view.x) / view.zoom - 0.5, (sy - view.y) / view.zoom - 0.5
-end
-
-local function fitView()
-  local margin = 24
-  local fit = math.min((view.w - margin * 2) / sprite.width, (view.h - margin * 2) / sprite.height)
-  local z = ZOOMS[1]
-  for _, v in ipairs(ZOOMS) do
-    if v <= fit then z = v end
-  end
-  view.zoom = z
-  view.x = round((view.w - sprite.width * z) / 2)
-  view.y = round((view.h - sprite.height * z) / 2)
-end
-
-local function zoomAt(sx, sy, dir)
-  local i = 1
-  for k, v in ipairs(ZOOMS) do
-    if v <= view.zoom then i = k end
-  end
-  local ni = math.max(1, math.min(#ZOOMS, i + dir))
-  if ni == i then return end
-  local fx, fy = (sx - view.x) / view.zoom, (sy - view.y) / view.zoom
-  view.zoom = ZOOMS[ni]
-  view.x = round(sx - fx * view.zoom)
-  view.y = round(sy - fy * view.zoom)
 end
 
 ------------------------------------------------------------------------
@@ -501,18 +595,10 @@ local function handlePos(n, side)
   return n.x + n.ox, n.y + n.oy
 end
 
-local function snap45(dx, dy)
-  local len = sqrt(dx * dx + dy * dy)
-  if len == 0 then return 0, 0 end
-  local step = math.pi / 4
-  local a = round(math.atan(dy, dx) / step) * step
-  return len * math.cos(a), len * math.sin(a)
-end
-
--- ハンドルを (hx, hy) に動かす。なめらかな点では反対側のハンドルも回す。
-local function moveHandle(n, side, hx, hy, alt, shift)
+-- ハンドルを (hx, hy) に動かす。なめらかな点では、oneSide でなければ
+-- 反対側のハンドルも回す。
+local function moveHandle(n, side, hx, hy, oneSide)
   local dx, dy = hx - n.x, hy - n.y
-  if shift then dx, dy = snap45(dx, dy) end
   local ox, oy
   if side == "out" then
     n.ox, n.oy = dx, dy
@@ -521,7 +607,7 @@ local function moveHandle(n, side, hx, hy, alt, shift)
     n.ix, n.iy = dx, dy
     ox, oy = n.ox, n.oy
   end
-  if alt then
+  if oneSide then
     n.smooth = false
     return
   end
@@ -535,9 +621,8 @@ local function moveHandle(n, side, hx, hy, alt, shift)
 end
 
 -- 点から (hx, hy) の向きに、両側のハンドルを引き出す
-local function pullHandles(n, hx, hy, shift)
+local function pullHandles(n, hx, hy)
   local dx, dy = hx - n.x, hy - n.y
-  if shift then dx, dy = snap45(dx, dy) end
   n.ox, n.oy, n.ix, n.iy = dx, dy, -dx, -dy
   n.smooth = dx ~= 0 or dy ~= 0
 end
@@ -578,7 +663,7 @@ local function deleteNode(pi, ni)
   end
 end
 
--- ダブルクリック: ハンドルのある点は角に、角の点は丸くする
+-- ハンドルのある点は角に、角の点は丸くする
 local function toggleRound(p, i)
   local n = p.nodes[i]
   if hasHandle(n, "in") or hasHandle(n, "out") then
@@ -604,452 +689,449 @@ local function toggleRound(p, i)
   n.smooth = dx ~= 0 or dy ~= 0
 end
 
--- 画面上で、マウスと区間の距離を調べる。
--- いちばん近い位置の t を返す。遠すぎるときは nil。
-local function hitSegment(a, b, mx, my, tolerance)
-  local c1x, c1y = toScreen(a.x + a.ox, a.y + a.oy)
-  local c2x, c2y = toScreen(b.x + b.ix, b.y + b.iy)
-  local ax, ay = toScreen(a.x, a.y)
-  local bx, by = toScreen(b.x, b.y)
-  local len = dist(ax, ay, c1x, c1y) + dist(c1x, c1y, c2x, c2y) + dist(c2x, c2y, bx, by)
-  local steps = math.max(8, math.min(400, math.ceil(len / 6)))
-  local best, bestT = tolerance * tolerance, nil
-  local px, py = ax, ay
-  for i = 1, steps do
-    local qx, qy = toScreen(bezier(a, b, i / steps))
-    local dx, dy = qx - px, qy - py
-    local l2 = dx * dx + dy * dy
-    local u = 0
-    if l2 > 0 then u = math.max(0, math.min(1, ((mx - px) * dx + (my - py) * dy) / l2)) end
-    local d2 = (mx - px - u * dx) ^ 2 + (my - py - u * dy) ^ 2
-    if d2 <= best then best, bestT = d2, (i - 1 + u) / steps end
-    px, py = qx, qy
+------------------------------------------------------------------------
+-- 線をキャンバスに表示する
+
+-- 直線のピクセルごとに fn(x, y, i) を呼ぶ(i は 0 から数える)
+local function linePixels(x0, y0, x1, y1, fn)
+  local dx, dy = abs(x1 - x0), abs(y1 - y0)
+  local sx, sy = x1 > x0 and 1 or -1, y1 > y0 and 1 or -1
+  local err, x, y, i = dx - dy, x0, y0, 0
+  while true do
+    fn(x, y, i)
+    if x == x1 and y == y1 then break end
+    local e2 = 2 * err
+    if e2 > -dy then err = err - dy; x = x + sx end
+    if e2 < dx then err = err + dx; y = y + sy end
+    i = i + 1
   end
-  return bestT
 end
 
--- マウスの下にあるもの(ハンドル・点・線)を探す
-local function hitTest(mx, my)
-  local function near(x, y)
-    local sx, sy = toScreen(x, y)
-    return (sx - mx) ^ 2 + (sy - my) ^ 2 <= HIT * HIT
+local function guidePixels()
+  local want = {}
+  if not dlg.data.guides then return want end
+  local function put(x, y, v)
+    local k = overlayKey(guideOv, x, y)
+    if k then want[k] = v end
   end
-
-  -- 選択中の線のハンドル(点と重なっているものは除く)
+  for pi, p in ipairs(paths) do
+    if pi ~= active then
+      for _, n in ipairs(p.nodes) do put(n.x, n.y, GUIDE_OTHER) end
+    end
+  end
   local p = paths[active]
   if p then
     for i, n in ipairs(p.nodes) do
-      local ax, ay = toScreen(n.x, n.y)
+      for _, side in ipairs({ "in", "out" }) do
+        if hasHandle(n, side) and handleUsed(p, i, side) then
+          local hx, hy = handlePos(n, side)
+          hx, hy = round(hx), round(hy)
+          -- 点からハンドルの先までの点線
+          linePixels(n.x, n.y, hx, hy, function(x, y, j)
+            if j % 2 == 0 then put(x, y, GUIDE_HANDLE) end
+          end)
+          put(hx, hy, GUIDE_HANDLE)
+        end
+      end
+    end
+    for i, n in ipairs(p.nodes) do
+      put(n.x, n.y, i == selNode and GUIDE_SELECTED or GUIDE_POINT)
+    end
+  end
+  return want
+end
+
+local function redraw()
+  local want = {}
+  for _, p in ipairs(paths) do
+    local v = outputPixel(p)
+    plotPath(p, function(x, y)
+      local k = overlayKey(curveOv, x, y)
+      if k then want[k] = v end
+    end)
+  end
+  showOverlay(curveOv, want)
+  showOverlay(guideOv, guidePixels())
+end
+
+-- 線をキャンバスに表示し、パネルを更新する
+local function refresh()
+  redraw()
+  updateButtons()
+  app.refresh()
+end
+
+-- fn を1回の編集として実行する。同じ mergeKey の編集が続いたとき
+-- (太さのスライダーを動かしている間など)は、まとめて1回で元に戻す。
+local function edit(fn, mergeKey)
+  local before = nil
+  if not mergeKey or mergeKey ~= lastMerge then before = snapshot() end
+  fn()
+  if before then
+    lastMerge = pushUndo(before) and mergeKey or nil
+  end
+  refresh()
+end
+
+local function restore(s)
+  paths = parse(s.data)
+  active, selNode = s.active, s.sel
+  if not paths[active] then active, selNode = nil, nil end
+  if active and selNode and not paths[active].nodes[selNode] then selNode = nil end
+  lastMerge, press = nil, nil
+  syncFields()
+  refresh()
+  askTimer:start()
+end
+
+local function undo()
+  if #undoStack == 0 then return end
+  redoStack[#redoStack + 1] = snapshot()
+  restore(table.remove(undoStack))
+end
+
+local function redo()
+  if #redoStack == 0 then return end
+  undoStack[#undoStack + 1] = snapshot()
+  restore(table.remove(redoStack))
+end
+
+local function deleteSelectedPoint()
+  if paths[active] and selNode then
+    edit(function() deleteNode(active, selNode) end)
+    askTimer:start()
+  end
+end
+
+------------------------------------------------------------------------
+-- キャンバスでのクリックとドラッグ
+
+-- どこまで近ければつかめるか(スプライトのピクセル数)
+local function tolerance()
+  local ok, zoom = pcall(function() return editor.zoom end)
+  if not ok or type(zoom) ~= "number" or zoom <= 0 then zoom = 8 end
+  return math.max(0.5, HIT / zoom)
+end
+
+-- 区間上で (x, y) にいちばん近い位置の t と、その距離を返す
+local function nearestOnSegment(a, b, x, y)
+  local len = dist(a.x, a.y, a.x + a.ox, a.y + a.oy)
+            + dist(a.x + a.ox, a.y + a.oy, b.x + b.ix, b.y + b.iy)
+            + dist(b.x + b.ix, b.y + b.iy, b.x, b.y)
+  local steps = math.max(8, math.min(2000, math.ceil(len * 2)))
+  local bestD, bestT = math.huge, 0
+  local px, py = a.x, a.y
+  for i = 1, steps do
+    local qx, qy = bezier(a, b, i / steps)
+    local dx, dy = qx - px, qy - py
+    local l2 = dx * dx + dy * dy
+    local u = 0
+    if l2 > 0 then u = math.max(0, math.min(1, ((x - px) * dx + (y - py) * dy) / l2)) end
+    local d = dist(x, y, px + u * dx, py + u * dy)
+    if d < bestD then bestD, bestT = d, (i - 1 + u) / steps end
+    px, py = qx, qy
+  end
+  return bestT, bestD
+end
+
+-- ピクセル (x, y) にあるもの(ハンドル・点・線)を探す
+local function hitTest(x, y)
+  local tol = tolerance()
+  local best, bestD = nil, math.huge
+  local function consider(d, hit)
+    if d <= tol and d < bestD then best, bestD = hit, d end
+  end
+
+  -- 選択中の線のハンドル(自分の点と重なっているものは除く)
+  local p = paths[active]
+  if p then
+    for i, n in ipairs(p.nodes) do
       for _, side in ipairs({ "out", "in" }) do
         if hasHandle(n, side) and handleUsed(p, i, side) then
           local hx, hy = handlePos(n, side)
-          local sx, sy = toScreen(hx, hy)
-          if (sx - ax) ^ 2 + (sy - ay) ^ 2 > HIT * HIT and near(hx, hy) then
-            return { kind = "handle", path = active, node = i, side = side }
+          if round(hx) ~= n.x or round(hy) ~= n.y then
+            consider(dist(x, y, hx, hy) + 0.01, { kind = "handle", path = active, node = i, side = side })
           end
         end
       end
     end
   end
 
-  -- 選択中の線を先に、ほかの線は上から順に
-  local order = {}
-  if p then order[1] = active end
-  for i = #paths, 1, -1 do
-    if i ~= active then order[#order + 1] = i end
-  end
-
-  for _, pi in ipairs(order) do
-    for i, n in ipairs(paths[pi].nodes) do
-      if near(n.x, n.y) then return { kind = "anchor", path = pi, node = i } end
+  -- 点(同じ距離なら選択中の線を優先)
+  for pi, q in ipairs(paths) do
+    local bias = pi == active and 0 or 0.02
+    for i, n in ipairs(q.nodes) do
+      consider(dist(x, y, n.x, n.y) + bias, { kind = "anchor", path = pi, node = i })
     end
   end
+  if best then return best end
 
-  for _, pi in ipairs(order) do
-    local q = paths[pi]
-    local tolerance = math.max(5, q.width * view.zoom / 2 + 2)
+  -- 線: 線のピクセルか、曲線の近くをクリックしたとき
+  for pi, q in ipairs(paths) do
+    local onPixel = false
+    plotPath(q, function(px, py)
+      if px == x and py == y then onPixel = true end
+    end)
     for _, s in ipairs(segments(q)) do
-      local t = hitSegment(s[1], s[2], mx, my, tolerance)
-      if t then return { kind = "segment", path = pi, seg = s[3], t = t } end
-    end
-  end
-  return nil
-end
-
-local function setCursor(kind)
-  if not MouseCursor then return end
-  local c = MouseCursor.CROSSHAIR
-  if kind == "anchor" or kind == "handle" then
-    c = MouseCursor.MOVE
-  elseif kind == "segment" then
-    c = MouseCursor.POINTER
-  elseif kind == "pan" then
-    c = MouseCursor.GRABBING or MouseCursor.MOVE
-  end
-  if c ~= cursor then
-    cursor = c
-    dlg:modify{ id = "canvas", mousecursor = c }
-  end
-end
-
-------------------------------------------------------------------------
--- キャンバスの描画
-
-local function box(gc, x, y, r, fill, stroke)
-  local rc = Rectangle(round(x) - r, round(y) - r, 2 * r + 1, 2 * r + 1)
-  gc.color = fill
-  gc:fillRect(rc)
-  gc.color = stroke
-  gc:strokeRect(rc)
-end
-
-local function diamond(gc, x, y, r, fill, stroke)
-  x, y = round(x) + 0.5, round(y) + 0.5
-  gc:beginPath()
-  gc:moveTo(x, y - r)
-  gc:lineTo(x + r, y)
-  gc:lineTo(x, y + r)
-  gc:lineTo(x - r, y)
-  gc:closePath()
-  gc.color = fill
-  gc:fill()
-  gc.color = stroke
-  gc:stroke()
-end
-
-local function strokePath(gc, p)
-  if #p.nodes < 2 then return end
-  gc:beginPath()
-  gc:moveTo(toScreen(p.nodes[1].x, p.nodes[1].y))
-  for _, s in ipairs(segments(p)) do
-    local a, b = s[1], s[2]
-    local c1x, c1y = toScreen(a.x + a.ox, a.y + a.oy)
-    local c2x, c2y = toScreen(b.x + b.ix, b.y + b.iy)
-    local ex, ey = toScreen(b.x, b.y)
-    gc:cubicTo(c1x, c1y, c2x, c2y, ex, ey)
-  end
-  gc:stroke()
-end
-
-local function drawCheckerboard(gc, x0, y0, x1, y1)
-  gc.color = CHECK_A
-  gc:fillRect(Rectangle(x0, y0, x1 - x0, y1 - y0))
-  gc.color = CHECK_B
-  local C = 8
-  for j = (y0 - view.y) // C, (y1 - 1 - view.y) // C do
-    local ry0 = math.max(y0, view.y + j * C)
-    local ry1 = math.min(y1, view.y + (j + 1) * C)
-    for i = (x0 - view.x) // C, (x1 - 1 - view.x) // C do
-      if (i + j) % 2 == 1 then
-        local rx0 = math.max(x0, view.x + i * C)
-        local rx1 = math.min(x1, view.x + (i + 1) * C)
-        gc:fillRect(Rectangle(rx0, ry0, rx1 - rx0, ry1 - ry0))
+      local t, d = nearestOnSegment(s[1], s[2], x, y)
+      if pi ~= active then d = d + 0.02 end
+      if (onPixel or d <= tol) and d < bestD then
+        best, bestD = { kind = "segment", path = pi, seg = s[3], t = t }, d
       end
     end
   end
+  return best
 end
 
-local function statusText()
-  local h = hover
-  if not h then
-    local p = paths[active]
-    if p and not p.closed then return HINT_ADD end
-    return HINT_NEW
-  elseif h.kind == "anchor" then
-    return HINT_ANCHOR
-  elseif h.kind == "handle" then
-    return HINT_HANDLE
-  end
-  return HINT_SEGMENT
-end
-
-local function paint(ev)
-  local gc = ev.context
-  view.w, view.h = gc.width, gc.height
-  if not view.fitted then
-    fitView()
-    view.fitted = true
-  end
-  local z = view.zoom
-
-  gc.color = OUTSIDE
-  gc:fillRect(Rectangle(0, 0, view.w, view.h))
-
-  -- スプライトの見えている部分
-  local x0 = math.max(0, floor(-view.x / z))
-  local y0 = math.max(0, floor(-view.y / z))
-  local x1 = math.min(sprite.width, math.ceil((view.w - view.x) / z))
-  local y1 = math.min(sprite.height, math.ceil((view.h - view.y) / z))
-  if x1 > x0 and y1 > y0 then
-    local sx0, sy0 = round(view.x + x0 * z), round(view.y + y0 * z)
-    local sx1, sy1 = round(view.x + x1 * z), round(view.y + y1 * z)
-    drawCheckerboard(gc, math.max(sx0, 0), math.max(sy0, 0),
-                     math.min(sx1, view.w), math.min(sy1, view.h))
-    gc:drawImage(bgImage, x0, y0, x1 - x0, y1 - y0, sx0, sy0, sx1 - sx0, sy1 - sy0)
-    gc:drawImage(previewImage, x0, y0, x1 - x0, y1 - y0, sx0, sy0, sx1 - sx0, sy1 - sy0)
-  end
-
-  -- 選択中の線とマウスの下の線の輪郭
-  gc.strokeWidth = 1
-  gc.antialias = true
-  gc.color = GUIDE_LINE
-  for pi, p in ipairs(paths) do
-    if pi == active or (hover and hover.path == pi) then strokePath(gc, p) end
-  end
-  gc.antialias = false
-
-  -- ほかの線の点
-  for pi, p in ipairs(paths) do
-    if pi ~= active then
-      for _, n in ipairs(p.nodes) do
-        local x, y = toScreen(n.x, n.y)
-        box(gc, x, y, 2, WHITE, DARK)
-      end
-    end
-  end
-
-  -- 選択中の線の点とハンドル
+-- 選択中の線の最後に点を追加する。選択中の線がなければ新しい線を始める
+local function addPoint(x, y)
   local p = paths[active]
-  if p then
-    for i, n in ipairs(p.nodes) do
-      local ax, ay = toScreen(n.x, n.y)
-      for _, side in ipairs({ "in", "out" }) do
-        if hasHandle(n, side) and handleUsed(p, i, side) then
-          local hx, hy = toScreen(handlePos(n, side))
-          gc.color = GUIDE
-          gc:beginPath()
-          gc:moveTo(ax, ay)
-          gc:lineTo(hx, hy)
-          gc:stroke()
-          diamond(gc, hx, hy, 4, GUIDE, WHITE)
-        end
-      end
-    end
-    for i, n in ipairs(p.nodes) do
-      local x, y = toScreen(n.x, n.y)
-      if i == selNode then box(gc, x, y, 3, GUIDE, WHITE) else box(gc, x, y, 3, WHITE, GUIDE) end
-    end
+  if not p or p.closed then
+    local d = dlg.data
+    p = { color = colorToTable(d.color), width = d.width, pixelPerfect = d.pixelPerfect,
+          closed = false, nodes = {} }
+    paths[#paths + 1] = p
+    select(#paths, nil)
   end
-
-  -- ステータスバー: 操作のヒント、マウスの下のピクセル、表示倍率
-  local text = statusText()
-  local mx, my = toSprite(mouse.x, mouse.y)
-  local info = string.format("%d, %d   %d%%", round(mx), round(my), round(z * 100))
-  local th = gc:measureText("Ag").height
-  local bh = th + 6
-  gc.color = STATUS_BG
-  gc:fillRect(Rectangle(0, view.h - bh, view.w, bh))
-  gc.color = WHITE
-  gc:fillText(text, 5, view.h - bh + 3)
-  local iw = gc:measureText(info).width
-  if gc:measureText(text).width + iw + 20 < view.w then
-    gc:fillText(info, view.w - iw - 5, view.h - bh + 3)
-  end
+  p.nodes[#p.nodes + 1] = { x = x, y = y, ix = 0, iy = 0, ox = 0, oy = 0, smooth = false }
+  selNode = #p.nodes
+  return { kind = "anchor", path = active, node = selNode }
 end
 
-------------------------------------------------------------------------
--- マウスとキーボード
-
-local function onMouseDown(ev)
-  mouse.x, mouse.y = ev.x, ev.y
-  if ev.button == MouseButton.MIDDLE or (ev.button == MouseButton.LEFT and ev.spaceKey) then
-    drag = { kind = "pan", mx = ev.x, my = ev.y, vx = view.x, vy = view.y }
-    setCursor("pan")
-    return
-  end
-
-  local hit = hitTest(ev.x, ev.y)
-
-  if ev.button == MouseButton.RIGHT then
-    if hit and hit.kind == "anchor" then
-      edit(function() deleteNode(hit.path, hit.node) end)
-    elseif hit and hit.kind == "handle" then
-      edit(function()
-        local n = paths[hit.path].nodes[hit.node]
-        if hit.side == "in" then n.ix, n.iy = 0, 0 else n.ox, n.oy = 0, 0 end
-      end)
-    end
-    hover = hitTest(ev.x, ev.y)
-    dlg:repaint()
-    return
-  end
-  if ev.button ~= MouseButton.LEFT then return end
-
+-- (x, y) でボタンが押された: ドラッグで何をするかを決める
+local function startGesture(x, y)
   lastMerge = nil
   local before = snapshot()
+  local hit = hitTest(x, y)
   if hit and hit.kind == "handle" then
     select(hit.path, hit.node)
-    drag = { kind = "handle", hit = hit, before = before }
+    local hx, hy = handlePos(paths[hit.path].nodes[hit.node], hit.side)
+    press = { kind = "handle", hit = hit, before = before, sx = x, sy = y, hx = hx, hy = hy }
   elseif hit and hit.kind == "anchor" then
     select(hit.path, hit.node)
     local n = paths[hit.path].nodes[hit.node]
-    drag = { kind = ev.altKey and "pull" or "anchor", hit = hit, before = before,
-             mx = ev.x, my = ev.y, x = n.x, y = n.y }
-  elseif hit and hit.kind == "segment" then
+    press = { kind = "anchor", hit = hit, before = before, sx = x, sy = y, x = n.x, y = n.y }
+  elseif hit then
     select(hit.path, nil)
     local orig = {}
     for i, n in ipairs(paths[hit.path].nodes) do orig[i] = { n.x, n.y } end
-    drag = { kind = "segment", hit = hit, before = before, mx = ev.x, my = ev.y, orig = orig }
+    press = { kind = "segment", hit = hit, before = before, sx = x, sy = y, orig = orig }
   else
-    -- 選択中の線の最後に点を追加する。選択中の線がなければ新しい線を始める
-    local p = paths[active]
-    if not p or p.closed then
-      local d = dlg.data
-      p = { color = colorToTable(d.color), width = d.width, pixelPerfect = d.pixelPerfect,
-            closed = false, nodes = {} }
-      paths[#paths + 1] = p
-      select(#paths, nil)
-    end
-    local x, y = toSprite(ev.x, ev.y)
-    p.nodes[#p.nodes + 1] = { x = round(x), y = round(y), ix = 0, iy = 0, ox = 0, oy = 0, smooth = false }
-    selNode = #p.nodes
-    hit = { kind = "anchor", path = active, node = selNode }
-    drag = { kind = "pull", hit = hit, before = before }
-    updatePreview()
+    press = { kind = "pull", hit = addPoint(x, y), before = before }
   end
-  hover = hit
-  dlg:repaint()
 end
 
-local function onMouseMove(ev)
-  mouse.x, mouse.y = ev.x, ev.y
-  local d = drag
-  if not d then
-    hover = hitTest(ev.x, ev.y)
-    setCursor(hover and hover.kind)
-    dlg:repaint()
-    return
-  end
-
-  if d.kind == "pan" then
-    view.x, view.y = round(d.vx + ev.x - d.mx), round(d.vy + ev.y - d.my)
-  elseif d.kind == "anchor" or d.kind == "segment" then
-    local dx = round((ev.x - d.mx) / view.zoom)
-    local dy = round((ev.y - d.my) / view.zoom)
-    if ev.shiftKey then
-      if abs(dx) >= abs(dy) then dy = 0 else dx = 0 end
-    end
-    if d.kind == "anchor" then
-      local n = paths[d.hit.path].nodes[d.hit.node]
-      n.x, n.y = d.x + dx, d.y + dy
-    else
-      -- 線をクリックすると点を追加、ドラッグすると線ごと移動
-      if not d.moved and (ev.x - d.mx) ^ 2 + (ev.y - d.my) ^ 2 > 9 then d.moved = true end
-      if d.moved then
-        for i, n in ipairs(paths[d.hit.path].nodes) do
-          n.x, n.y = d.orig[i][1] + dx, d.orig[i][2] + dy
-        end
-      end
-    end
-    updatePreview()
+local function dragTo(x, y)
+  local d = press
+  local n = d.hit.node and paths[d.hit.path].nodes[d.hit.node]
+  if d.kind == "anchor" then
+    n.x, n.y = d.x + x - d.sx, d.y + y - d.sy
   elseif d.kind == "handle" then
-    local hx, hy = toSprite(ev.x, ev.y)
-    moveHandle(paths[d.hit.path].nodes[d.hit.node], d.hit.side, hx, hy, ev.altKey, ev.shiftKey)
-    updatePreview()
+    moveHandle(n, d.hit.side, d.hx + x - d.sx, d.hy + y - d.sy, dlg.data.oneSide)
   elseif d.kind == "pull" then
-    local n = paths[d.hit.path].nodes[d.hit.node]
-    local ax, ay = toScreen(n.x, n.y)
-    if (ev.x - ax) ^ 2 + (ev.y - ay) ^ 2 < 9 then
+    if x == n.x and y == n.y then
       n.ix, n.iy, n.ox, n.oy, n.smooth = 0, 0, 0, 0, false
     else
-      local hx, hy = toSprite(ev.x, ev.y)
-      pullHandles(n, hx, hy, ev.shiftKey)
+      pullHandles(n, x, y)
     end
-    updatePreview()
+  elseif d.kind == "segment" then
+    -- 線をクリックすると点を追加、ドラッグすると線ごと移動
+    if x ~= d.sx or y ~= d.sy then d.moved = true end
+    if d.moved then
+      for i, m in ipairs(paths[d.hit.path].nodes) do
+        m.x, m.y = d.orig[i][1] + x - d.sx, d.orig[i][2] + y - d.sy
+      end
+    end
   end
-  dlg:repaint()
 end
 
-local function onMouseUp(ev)
-  local d = drag
-  if not d then return end
-  drag = nil
+local function endGesture(x, y, dragged)
+  local d = press
+  if dragged then dragTo(x, y) end
+  press = nil
   if d.kind == "segment" and not d.moved then
-    local ni = insertNode(paths[d.hit.path], d.hit.seg, d.hit.t)
-    select(d.hit.path, ni)
-    updatePreview()
+    select(d.hit.path, insertNode(paths[d.hit.path], d.hit.seg, d.hit.t))
   end
-  if d.before then pushUndo(d.before) end
-  hover = hitTest(ev.x, ev.y)
-  setCursor(hover and hover.kind)
-  dlg:repaint()
+  pushUndo(d.before)
+  refresh()
 end
 
-local function onDoubleClick(ev)
-  if ev.button ~= MouseButton.LEFT then return end
-  if drag and drag.kind ~= "pan" then drag = nil end
-  local hit = hitTest(ev.x, ev.y)
-  if hit and hit.kind == "anchor" then
-    select(hit.path, hit.node)
-    edit(function() toggleRound(paths[hit.path], hit.node) end)
-  end
+local ask
+
+-- ボタンを押している間、マウスが動くたびに呼ばれる
+local function onChange(ev)
+  if finished then return end
+  local pt = ev.point
+  if not press then startGesture(pt.x, pt.y) end
+  dragTo(pt.x, pt.y)
+  redraw()
 end
 
-local function onWheel(ev)
-  local dir = 0
-  if ev.deltaY < 0 then dir = 1 elseif ev.deltaY > 0 then dir = -1 end
-  if dir ~= 0 then
-    zoomAt(ev.x, ev.y, dir)
-    hover = hitTest(ev.x, ev.y)
-    dlg:repaint()
+-- ボタンが離された
+local function onClick(ev)
+  if finished then return end
+  local pt = ev.point
+  if press then
+    endGesture(pt.x, pt.y, true)
+  else
+    startGesture(pt.x, pt.y)
+    endGesture(pt.x, pt.y, false)
   end
+  -- askPoint() はクリックのたびに終わるので、もう一度呼ぶ(ここからは呼べない)
+  askTimer:start()
 end
 
-local ARROWS = { ArrowLeft = { -1, 0 }, ArrowRight = { 1, 0 }, ArrowUp = { 0, -1 }, ArrowDown = { 0, 1 } }
+-- Esc はドラッグを取り消すか、線の選択を解除する
+local function onCancel()
+  if finished then return end
+  if press then
+    local before = press.before
+    press = nil
+    restore(before)
+  elseif active then
+    select(nil, nil)
+    refresh()
+  end
+  askTimer:start()
+end
 
-local function onKeyDown(ev)
-  local code = ev.code
-  local ctrl = ev.ctrlKey or ev.metaKey
-  if ctrl and code == "KeyZ" then
-    if ev.shiftKey then redo() else undo() end
-    ev:stopPropagation()
-  elseif ctrl and code == "KeyY" then
-    redo()
-    ev:stopPropagation()
-  elseif code == "Escape" and (drag or paths[active]) then
-    -- Esc はウィンドウを閉じる前に、まずドラッグの取り消しや線の選択解除をする
-    local d = drag
-    drag = nil
-    if d and d.before then
-      restore(d.before)
+ask = function()
+  if finished or app.editor ~= editor then return end
+  local p = paths[active]
+  local n = p and selNode and p.nodes[selNode]
+  -- `point` で選択中の点を枠で囲む
+  editor:askPoint{ title = HINT, point = n and Point(n.x, n.y) or nil,
+                   onchange = onChange, onclick = onClick, oncancel = onCancel }
+end
+
+------------------------------------------------------------------------
+-- 編集の終了
+
+local function finish(apply, canUndo, fromPanelClose)
+  if finished then return end
+  finished = true
+  press = nil
+  rawset(_G, SESSION, nil)
+  askTimer:stop()
+  autoTimer:stop()
+  -- イベントを送っている最中にはリスナーを外せない
+  cleanupTimer:start()
+  if oldDoubleClick ~= nil then
+    pcall(function() app.preferences.selection.doubleclick_select_tile = oldDoubleClick end)
+  end
+  pcall(function() rawset(_G, PANEL_BOUNDS, dlg.bounds) end)
+
+  local ok, err = pcall(function()
+    if not pcall(function() return sprite.width end) then return end   -- スプライトが閉じられた
+
+    -- ほかのスプライトを表示中でも、編集していたスプライトで作業する
+    local keepSprite, keepFrame = app.sprite, app.frame
+    local switched = keepSprite ~= sprite
+    if switched then app.sprite = sprite end
+    if app.editor == editor then editor:cancel() end
+
+    -- ピクセルを準備した直後の状態に戻す
+    pcall(restoreOverlay, curveOv)
+    pcall(restoreOverlay, guideOv)
+
+    if historyMoved then
+      -- (元に戻す履歴パネルなどで)履歴が動かされたので、そのままにする
+      app.alert{ title = TITLE, text = "元に戻す履歴が変更されたため、ベジェ曲線の編集を終了しました。" }
     else
-      select(nil, nil)
-      hover = nil
-      dlg:repaint()
+      local result = serialize(paths)
+      local changed = apply and result ~= original
+
+      -- 準備が履歴の最後のままなら、それを元に戻す
+      local undone = false
+      if canUndo and not externalChange then
+        app.command.Undo()
+        -- うまくいったか確かめる: ガイドレイヤーがなくなっていればよい
+        undone = true
+        for _, l in ipairs(sprite.layers) do
+          if l == guideLayer then undone = false end
+        end
+      end
+
+      if not undone or changed then
+        app.transaction(TITLE, function()
+          -- 準備を元に戻すと、そのとき作ったレイヤーはなくなる
+          local target = layer
+          if undone then target = curveLayer end
+          if not undone then
+            sprite:deleteLayer(guideLayer)
+            if not changed then
+              -- キャンセル: 準備でしたことを元に戻す
+              if createdLayer then
+                sprite:deleteLayer(layer)
+              elseif oldCel then
+                cel.image = oldImage
+                cel.position = oldPos
+              else
+                sprite:deleteCel(cel)
+              end
+              return
+            end
+            if createdLayer and #paths == 0 then
+              sprite:deleteLayer(layer)
+              return
+            end
+          end
+
+          if not target then
+            target = sprite:newLayer()
+            target.name = newLayerName()
+            if src then
+              target.parent = src.parent
+              target.stackIndex = src.stackIndex + 1
+            end
+            target.properties(KEY).curve = true
+          end
+          local c = target:cel(frameNumber)
+          if #paths == 0 then
+            if c then sprite:deleteCel(c) end
+          else
+            local img, pos = renderPaths(paths)
+            if c then
+              c.image = img
+              c.position = pos
+            else
+              c = sprite:newCel(target, frameNumber, img, pos)
+            end
+            c.properties(KEY, { version = 1, x = pos.x, y = pos.y, paths = result })
+          end
+          app.layer = target
+        end)
+      end
     end
-    ev:stopPropagation()
-  elseif (code == "Delete" or code == "Backspace") and paths[active] and selNode then
-    edit(function() deleteNode(active, selNode) end)
-    ev:stopPropagation()
-  elseif ARROWS[code] and paths[active] and selNode then
-    -- 矢印キーで選択中の点を1ピクセルずつ動かす
-    local n = paths[active].nodes[selNode]
-    edit(function()
-      n.x, n.y = n.x + ARROWS[code][1], n.y + ARROWS[code][2]
-    end, "nudge" .. active .. ":" .. selNode)
-    ev:stopPropagation()
+
+    -- ユーザーがいた場所に戻る
+    if switched then
+      app.sprite = keepSprite
+    elseif keepFrame and keepFrame.frameNumber ~= frameNumber then
+      app.frame = keepFrame
+    end
+  end)
+
+  if not fromPanelClose then dlg:close() end
+  app.refresh()
+  if not ok then
+    app.alert{ title = TITLE, text = { "ベジェ曲線の編集を終えるときにエラーが起きました:", tostring(err) } }
   end
 end
 
 ------------------------------------------------------------------------
--- ダイアログ
+-- パネル
 
 local function changeStyle(key, apply)
-  if syncing then return end
+  if syncing or finished then return end
   local p = paths[active]
   if p then edit(function() apply(p) end, key .. active) end
 end
 
-dlg = Dialog{ title = TITLE }
-dlg:canvas{ id = "canvas", width = 480, height = 360,
-            onpaint = paint,
-            onmousedown = onMouseDown,
-            onmousemove = onMouseMove,
-            onmouseup = onMouseUp,
-            ondblclick = onDoubleClick,
-            onwheel = onWheel,
-            onkeydown = onKeyDown }
-   :label{ text = "ホイール: 拡大縮小  中ボタン/Space+ドラッグ: スクロール  Shift: まっすぐ  Ctrl+Z: 元に戻す" }
+dlg = Dialog{ title = TITLE, onclose = function() finish(true, true, true) end }
+dlg:label{ text = "キャンバスをクリックで点を追加、点やハンドルをドラッグで曲げる" }
+   :newrow()
+   :label{ text = "線をクリックでそこに点を追加 / Del: 点を削除" }
    :separator{ id = "styleSep", text = "次に描く線" }
    :color{ id = "color", label = "色", color = app.fgColor,
            onchange = function()
@@ -1067,84 +1149,126 @@ dlg:canvas{ id = "canvas", width = 480, height = 360,
            onclick = function()
              changeStyle("closed", function(p) p.closed = dlg.data.closed end)
            end }
+   :check{ id = "oneSide", label = "", text = "ハンドルを片側だけ動かす", selected = false }
+   :check{ id = "guides", text = "ガイドを表示", selected = true,
+           onclick = function() if not finished then refresh() end end }
+   :separator{}
    :button{ id = "newLine", text = "新しい線",
             onclick = function()
+              if finished then return end
               select(nil, nil)
-              hover = nil
-              dlg:repaint()
+              refresh()
+              askTimer:start()
             end }
    :button{ id = "deleteLine", text = "線を削除",
             onclick = function()
-              if not paths[active] then return end
+              if finished or not paths[active] then return end
               local pi = active
               edit(function()
                 table.remove(paths, pi)
                 select(nil, nil)
               end)
+              askTimer:start()
             end }
-   :button{ id = "undo", text = "元に戻す", onclick = undo }
-   :button{ id = "fit", text = "全体を表示",
+   :newrow()
+   :button{ id = "deletePoint", text = "点を削除",
+            onclick = function() if not finished then deleteSelectedPoint() end end }
+   :button{ id = "roundSharp", text = "丸/角",
             onclick = function()
-              fitView()
-              dlg:repaint()
+              if finished or not (paths[active] and selNode) then return end
+              local p, i = paths[active], selNode
+              edit(function() toggleRound(p, i) end)
             end }
+   :newrow()
+   :button{ id = "undo", text = "元に戻す", onclick = function() if not finished then undo() end end }
+   :button{ id = "redo", text = "やり直す", onclick = function() if not finished then redo() end end }
    :separator{}
-   :button{ id = "ok", text = "確定", focus = true }
-   :button{ id = "cancel", text = "キャンセル" }
-
-syncFields()
-updatePreview()
-dlg:show()
-
-if not dlg.data.ok then return end
+   :button{ id = "ok", text = "確定", focus = true, onclick = function() finish(true, true) end }
+   :button{ id = "cancel", text = "キャンセル", onclick = function() finish(false, true) end }
 
 ------------------------------------------------------------------------
--- 確定
+-- 開始
 
-local result = serialize(paths)
-if result == original then return end
+askTimer = Timer{ interval = 0.01, ontick = function()
+  askTimer:stop()
+  ask()
+end }
 
-local function newLayerName()
-  local used = {}
-  local function scan(layers)
-    for _, l in ipairs(layers) do
-      used[l.name] = true
-      if l.isGroup then scan(l.layers) end
-    end
-  end
-  scan(sprite.layers)
-  local n = 1
-  while used["曲線 " .. n] do n = n + 1 end
-  return "曲線 " .. n
+-- ほかのフレームやスプライトに移ったとき、またはほかの操作がスプライトを
+-- 変えたときに、編集を確定する
+autoTimer = Timer{ interval = 0.01, ontick = function()
+  autoTimer:stop()
+  finish(true, true)
+  local cmd = pendingCommand
+  pendingCommand = nil
+  if cmd and app.command[cmd.name] then app.command[cmd.name](cmd.params) end
+end }
+
+cleanupTimer = Timer{ interval = 0.01, ontick = function()
+  cleanupTimer:stop()
+  for _, l in ipairs(listeners) do pcall(function() l[1]:off(l[2]) end) end
+  listeners = {}
+end }
+
+local function listen(events, name, fn)
+  listeners[#listeners + 1] = { events, events:on(name, fn) }
 end
 
-app.transaction(TITLE, function()
-  local layer = curveLayer
-  if not layer then
-    layer = sprite:newLayer()
-    layer.name = newLayerName()
-    if src then
-      layer.parent = src.parent
-      layer.stackIndex = src.stackIndex + 1
-    end
-    layer.properties(KEY).curve = true
+listen(app.events, "beforecommand", function(ev)
+  if finished then return end
+  local here = app.sprite == sprite
+  if here and ev.name == "Undo" then
+    undo()
+    ev.stopPropagation()
+  elseif here and ev.name == "Redo" then
+    redo()
+    ev.stopPropagation()
+  elseif here and ev.name == "Clear" then
+    -- Delete/Backspace はピクセルを消す代わりに、選択中の点を削除する
+    deleteSelectedPoint()
+    ev.stopPropagation()
+  elseif not VIEW_COMMANDS[ev.name] then
+    -- コマンドをいったん止め、編集を確定してから、もう一度実行する
+    -- (ここで確定すると、準備の分が元に戻す履歴に残ってしまう)
+    if not pendingCommand then pendingCommand = { name = ev.name, params = ev.params } end
+    ev.stopPropagation()
+    autoTimer:start()
   end
-
-  local cel = layer:cel(frameNumber)
-  if #paths == 0 then
-    if cel then sprite:deleteCel(cel) end
-  else
-    local img, pos = renderPaths(paths)
-    if cel then
-      cel.image = img
-      cel.position = pos
-    else
-      cel = sprite:newCel(layer, frameNumber, img, pos)
-    end
-    cel.properties(KEY, { version = 1, x = pos.x, y = pos.y, paths = result })
-  end
-
-  app.layer = layer
 end)
 
-app.refresh()
+listen(app.events, "sitechange", function()
+  if finished then return end
+  if app.sprite ~= sprite or not app.frame or app.frame.frameNumber ~= frameNumber then
+    autoTimer:start()
+  end
+end)
+
+listen(sprite.events, "change", function(ev)
+  if finished then return end
+  externalChange = true
+  if ev.fromUndo then historyMoved = true end
+  autoTimer:start()
+end)
+
+-- 素早く2回クリックするとグリッドのタイルが選択されてしまう(スクリプトにも届かない)
+pcall(function()
+  oldDoubleClick = app.preferences.selection.doubleclick_select_tile
+  app.preferences.selection.doubleclick_select_tile = false
+end)
+
+rawset(_G, SESSION, { finish = finish })
+
+syncFields()
+dlg:show{ wait = false }
+
+-- パネルはじゃまにならない位置に置く: 前回の位置か、右端
+local b = dlg.bounds
+local saved = rawget(_G, PANEL_BOUNDS)
+if saved then
+  dlg.bounds = Rectangle(saved.x, saved.y, b.width, b.height)
+elseif app.window then
+  dlg.bounds = Rectangle(math.max(0, app.window.width - b.width - 24), 72, b.width, b.height)
+end
+
+refresh()
+ask()

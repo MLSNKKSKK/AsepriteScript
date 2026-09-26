@@ -10,7 +10,7 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
 | [Import GIF as Layer](#import-gif-as-layer) | Imports a GIF animation into the open sprite as a layer. |
 | [Replace Color in All Layers](#replace-color-in-all-layers) | Replaces one color with another in every layer and frame at once. |
 | [Create Effect Layer](#create-effect-layer) | Adds a color layer shaped like the active layer, with a blend mode such as Multiply. |
-| [Bezier Curve](#bezier-curve) | Draws lines with Bezier curves that you can edit again later. |
+| [Bezier Curve](#bezier-curve) | Draws lines with Bezier curves right on the canvas, and lets you edit them again later. |
 
 ## Installation
 
@@ -165,9 +165,9 @@ When run without the UI, the script uses the foreground color, Multiply and full
 
 ## Bezier Curve
 
-Draws lines with Bezier curves on a separate "curve layer". The lines stay editable: run the script again later to move the points, change how the lines bend, or change their color and width.
+Draws lines with Bezier curves right on the canvas, on a separate "curve layer". The lines stay editable: run the script again later to move the points, change how the lines bend, or change their color and width.
 
-- Place points and drag handles in an editor window, like the Pen tool in drawing apps
+- Click and drag on the canvas, like the Pen tool in drawing apps. A small panel holds the settings
 - Several lines per layer, each with its own color and width (1–32 px, round brush)
 - Pixel-perfect option for clean 1px lines
 - Closed shapes (connect the last point to the first)
@@ -177,53 +177,58 @@ Draws lines with Bezier curves on a separate "curve layer". The lines stay edita
 
 ### Usage
 
-Select the layer you want the lines to go above, then run **File > Scripts > Bezier Curve**. An editor window opens with the current frame in it. Points are shown as squares and handles as diamonds.
+Select the layer you want the lines to go above, then run **File > Scripts > Bezier Curve**. A small panel opens at the right edge of the window and you can draw on the canvas right away. Zooming with the mouse wheel and scrolling with Space+drag work as usual.
 
-| Mouse / key | What it does |
+| On the canvas | What it does |
 | --- | --- |
-| Click an empty spot | Adds a point to the end of the selected line, or starts a new line if none is selected. Drag before releasing to pull out handles and bend the line. |
+| Click an empty spot | Adds a point to the end of the selected line, or starts a new line if none is selected. |
+| Press on an empty spot and drag | Adds a point and pulls out its handles, bending the line. |
 | Drag a point | Moves the point. |
-| Drag a handle | Changes how the line bends. The handle on the other side turns with it; hold **Alt** to move just this one. |
+| Drag a handle | Changes how the line bends. The handle on the other side turns with it, unless **Move one handle only** is checked. |
 | Click a line | Adds a point there without changing the shape. |
 | Drag a line | Moves the whole line. |
-| Right-click a point | Deletes the point. |
-| Right-click a handle | Removes the handle (that side of the point becomes straight). |
-| Double-click a point | Switches the point between round and sharp. |
-| **Alt**+drag a point | Pulls new handles out of the point. |
-| **Shift** while dragging | Moves points only horizontally or vertically, and snaps handles to 45° steps. |
-| Arrow keys | Move the selected point by 1 pixel. |
-| **Delete** | Deletes the selected point. |
-| **Ctrl+Z** / **Ctrl+Y** | Undo / redo inside the editor. |
-| **Esc** | Deselects the line. Press it again to close the window without applying. |
-| Mouse wheel | Zooms in and out. |
-| Middle-drag or **Space**+drag | Scrolls the view. |
+| Click a point | Selects it (it gets a white outline). |
+| **Delete** / **Backspace** | Deletes the selected point. |
+| **Ctrl+Z** / **Ctrl+Y** | Undo / redo your changes to the lines. |
+| **Esc** | Cancels the drag in progress, or deselects the line. |
 
-The bar at the bottom of the editor shows what a click or drag will do at the mouse position, the pixel under the mouse and the zoom level.
+While you edit, the points and handles are shown as colored pixels on a temporary layer called `Bezier Curve guides (editing)`: magenta for the points of the selected line, yellow for the selected point, cyan for the handles, and purple for the points of the other lines. They are removed when you finish. Zoom in to work comfortably.
 
-| Field | Description |
+| Panel | Description |
 | --- | --- |
 | **Color** | The line color. Starts as the current foreground color. |
 | **Width** | The line width in pixels (1–32). |
 | **Pixel-perfect (width 1)** | Removes the doubled pixels at the corners of 1px lines. |
 | **Connect the ends** | Joins the last point of the selected line back to the first. |
+| **Move one handle only** | Dragging a handle doesn't turn the one on the other side, so you can make sharp corners. |
+| **Show guides** | Shows or hides the points and handles, to check how the line really looks. |
 | **New Line** | Deselects the line, so the next click starts a new one. |
-| **Delete Line** | Deletes the selected line. |
-| **Undo** | Undoes the last change in the editor. |
-| **Fit** | Zooms to show the whole sprite. |
+| **Delete Line** / **Delete Point** | Deletes the selected line / point. |
+| **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
+| **Undo** / **Redo** | Undo / redo your changes to the lines. |
+| **Apply** / **Cancel** | Finishes the edit. **Cancel** throws away the changes. |
 
 When a line is selected, the fields show its settings and changing them changes that line. When no line is selected, they are the settings for the next new line.
 
-Click **Apply**. The first time, a new layer named `Curve 1` is created right above the active layer.
+Click **Apply** (or close the panel). The first time, a new layer named `Curve 1` is created right above the active layer.
+
+The edit is also applied automatically when you go to another frame or sprite, or use any other command (such as saving), like Aseprite's Text tool does. View commands like zoom and grid don't end the edit.
 
 ### Editing the lines later
 
-Select the curve layer, go to the frame you want to change and run **Bezier Curve** again. The lines of that frame open in the editor.
+Select the curve layer, go to the frame you want to change and run **Bezier Curve** again. The lines of that frame become editable on the canvas.
 
 - The lines are saved in the cel, so they're kept in `.aseprite` files. Other formats such as PNG only keep the pixels.
 - If you move the curve layer with the Move tool, the lines move with it.
 - New frames and copied cels keep their lines, so you can copy a frame and adjust the lines for the next pose. Linked cels share the same lines.
 - Anything painted by hand on the curve layer is lost when you apply an edit, because the frame is redrawn from the lines (the script warns you first). Paint on other layers instead.
 - The English and Japanese versions use the same data, so either one can edit lines made with the other.
+
+### Limitations
+
+Aseprite scripts can't draw on top of the canvas or tell which mouse button or modifier keys were used on it. That's why the points and handles are shown as pixels, and why deleting points and making sharp corners use the panel or the Delete key instead of right-click and Alt. Handles snap to whole pixels.
+
+A second click right after the first can be taken as a double-click and ignored, so leave a short pause between clicks when placing points close together. (While editing, the script turns off **Select a grid tile with double-click** in the preferences, and turns it back on when you finish.)
 
 ## Requirements
 
