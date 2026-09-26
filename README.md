@@ -188,8 +188,9 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 
 | On the canvas | What it does |
 | --- | --- |
-| Click an empty spot | Adds a point to the end of the selected line, or starts a new line if none is selected. |
+| Click an empty spot | Starts a new line, or adds a point to the end of the line you're drawing (or the selected line). |
 | Press on an empty spot and drag | Adds a point and pulls out its handles, bending the line. |
+| Click the last point of the line you're drawing, or press **Enter** | Finishes the line. The next click on an empty spot starts a new one. |
 | Drag a point | Moves the point. |
 | Drag a handle | Changes how the line bends. The handle on the other side turns with it, unless **Move one handle only** is checked. |
 | Click a line | Adds a point there without changing the shape. |
@@ -197,7 +198,9 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 | Click a point | Selects it (it gets a white outline). |
 | **Delete** / **Backspace** | Deletes the selected point. |
 | **Ctrl+Z** / **Ctrl+Y** | Undo / redo. Your recent changes to the lines are undone first, then Aseprite's own history. |
-| **Esc** | Cancels the drag in progress, or deselects the line. |
+| **Esc** | Cancels the drag in progress, or finishes / deselects the line. |
+
+While you're drawing a line, clicks only add to that line: other lines can't be grabbed, so you can start on another line's point or cross over a line. After you finish the line, clicking another line selects it for editing.
 
 There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
 
@@ -211,7 +214,7 @@ While you edit, the points and handles are shown on the curve layer as bright gr
 | **Connect the ends** | Joins the last point of the selected line back to the first. |
 | **Move one handle only** | Dragging a handle doesn't turn the one on the other side, so you can make sharp corners. |
 | **Show guides** | Shows or hides the points and handles, to check how the line really looks. |
-| **New Line** | Starts a new line. Until you press **Esc**, clicks only draw the new line: other lines can't be grabbed, so you can start on or cross over them. |
+| **New Line** | Finishes the current line, so the next click starts a new one. |
 | **Delete Line** / **Delete Point** | Deletes the selected line / point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
 | **Undo** / **Redo** | Undo / redo your changes to the lines. |
@@ -232,7 +235,7 @@ Editing also pauses while the animation plays, and starts again when you stop it
 
 ### Limitations
 
-Aseprite scripts can't draw on top of the canvas or tell which mouse button or modifier keys were used on it. That's why the points and handles are shown as pixels, and why deleting points and making sharp corners use the panel or the Delete key instead of right-click and Alt. Handles snap to whole pixels.
+Aseprite scripts can't draw on top of the canvas or tell which mouse button or modifier keys were used on it. That's why the points and handles are shown as pixels, and why deleting points, making sharp corners and finishing a line use the panel, the Delete key, Enter or Esc instead of right-click and Alt. Handles snap to whole pixels.
 
 A second click right after the first can be taken as a double-click and ignored, so leave a short pause between clicks when placing points close together. (While editing, the extension turns off **Select a grid tile with double-click** in the preferences, and turns it back on afterwards.)
 
