@@ -189,6 +189,8 @@ end
 -- as if its ends were joined by a straight line. With stroke off, only the
 -- fill is drawn. With antialias on, the edges of the line and the fill are
 -- smoothed with partly transparent pixels.
+-- A line can also keep a center (pivot) for rotating and shearing it, and
+-- the list of lines can keep one for transforming all of them together.
 
 local function colorToTable(c)
   return { r = c.red, g = c.green, b = c.blue, a = c.alpha, index = c.index }
@@ -203,12 +205,17 @@ local function serialize(paths)
   -- Handles are saved with 2 decimals
   local function h(v) return round(v * 100) / 100 end
   local lines = {}
+  local function pivot(pv)
+    if pv then lines[#lines + 1] = string.format("pivot %d %d", pv.x, pv.y) end
+  end
+  pivot(paths.pivot)
   for _, p in ipairs(paths) do
     local c, f = p.color, p.fillColor or p.color
     lines[#lines + 1] = string.format("path %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
       c.r, c.g, c.b, c.a, c.index, p.width, p.closed and 1 or 0, p.pixelPerfect and 1 or 0,
       p.fill and 1 or 0, f.r, f.g, f.b, f.a, f.index, p.stroke == false and 0 or 1,
       p.antialias and 1 or 0)
+    pivot(p.pivot)
     for _, n in ipairs(p.nodes) do
       lines[#lines + 1] = string.format("node %d %d %.2f %.2f %.2f %.2f %d",
         n.x, n.y, h(n.ix), h(n.iy), h(n.ox), h(n.oy), n.smooth and 1 or 0)
@@ -240,6 +247,10 @@ local function parse(text)
         nodes = {},
       }
       paths[#paths + 1] = cur
+    elseif v[1] == "pivot" then
+      -- After a path line: that line's center; before any: the one for all lines
+      local pv = { x = floor(num(2)), y = floor(num(3)) }
+      if cur then cur.pivot = pv else paths.pivot = pv end
     elseif v[1] == "node" and cur then
       cur.nodes[#cur.nodes + 1] = {
         x = floor(num(2)), y = floor(num(3)),
@@ -1004,14 +1015,24 @@ local function copyNodes(paths, list)
     for i, n in ipairs(paths[pi].nodes) do
       c[i] = { x = n.x, y = n.y, ix = n.ix, iy = n.iy, ox = n.ox, oy = n.oy }
     end
+    c.pivot = paths[pi].pivot
     orig[pi] = c
   end
   return orig
 end
 
--- Sets the points of the lines to their copies moved by fn
+-- Moves a center with fn (it stays on a whole pixel)
+local function mapPivot(pv, fn)
+  if not pv then return nil end
+  local x, y = fn(pv.x, pv.y)
+  return { x = round(x), y = round(y) }
+end
+
+-- Sets the points of the lines to their copies moved by fn. The lines'
+-- centers go along.
 local function mapNodes(paths, orig, fn)
   for pi, c in pairs(orig) do
+    paths[pi].pivot = mapPivot(c.pivot, fn)
     local nodes = paths[pi].nodes
     for i, o in ipairs(c) do
       local n = nodes[i]
@@ -1183,9 +1204,16 @@ local function xfBox()
     if p.stroke ~= false then pad = math.max(pad, p.width // 2 + 2) end
   end
   local W, H = s.sprite.width, s.sprite.height
-  local function clamp(v, hi) return math.max(0, math.min(hi, v)) end
-  local ex0, ex1 = clamp(floor(x0) - pad, W - 1), clamp(math.ceil(x1) + pad, W - 1)
-  local ey0, ey1 = clamp(floor(y0) - pad, H - 1), clamp(math.ceil(y1) + pad, H - 1)
+  -- At least 8 pixels each way, so a flat shape (like a straight line)
+  -- still has room inside the box between its handles
+  local function side(a0, a1, hi)
+    a0, a1 = floor(a0) - pad, math.ceil(a1) + pad
+    local short = 8 - (a1 - a0)
+    if short > 0 then a0, a1 = a0 - short // 2, a1 + short - short // 2 end
+    return math.max(0, math.min(hi, a0)), math.max(0, math.min(hi, a1))
+  end
+  local ex0, ex1 = side(x0, x1, W - 1)
+  local ey0, ey1 = side(y0, y1, H - 1)
   local mx, my = (ex0 + ex1) // 2, (ey0 + ey1) // 2
   return {
     x0 = x0, y0 = y0, x1 = x1, y1 = y1, ex0 = ex0, ey0 = ey0, ex1 = ex1, ey1 = ey1,
@@ -1195,10 +1223,17 @@ local function xfBox()
   }
 end
 
+-- What keeps the center for the lines being transformed: the selected
+-- line, or the list of lines (for all of them)
+local function pivotOwner()
+  local s = S
+  return s.paths[s.active] or s.paths
+end
+
 -- The center that rotating and shearing work around: where the user put it,
 -- or the middle of the lines
 local function xfPivot(b)
-  local pv = S.xf and S.xf.pivot
+  local pv = pivotOwner().pivot
   if pv then return pv.x, pv.y end
   return turnCenter(b.x0, b.y0, b.x1, b.y1)
 end
@@ -1401,7 +1436,7 @@ end
 
 local function snapshot()
   local s = S
-  return { data = serialize(s.paths), active = s.active, sel = s.selNode, pivot = s.xf and s.xf.pivot }
+  return { data = serialize(s.paths), active = s.active, sel = s.selNode }
 end
 
 -- Adds an undo step if the lines changed since `before`
@@ -1432,7 +1467,6 @@ local function restore(snap)
   s.active, s.selNode = snap.active, snap.sel
   if not s.paths[s.active] then s.active, s.selNode = nil, nil end
   if s.active and s.selNode and not s.paths[s.active].nodes[s.selNode] then s.selNode = nil end
-  if s.xf then s.xf.pivot = snap.pivot end
   s.lastMerge, s.press = nil, nil
   syncFields()
   refresh()
@@ -1619,7 +1653,8 @@ local function startGesture(x, y)
     -- (move), or outside (done). The nearest handle or center wins.
     local b = xfBox()
     local press = { kind = "xfOut", before = before, sx = x, sy = y, box = b, mode = s.xf.mode,
-                    orig = copyNodes(s.paths, xfTargets()), pivot = s.xf.pivot }
+                    orig = copyNodes(s.paths, xfTargets()),
+                    allPivot = not s.paths[s.active] and s.paths.pivot or nil }
     if b then
       press.px, press.py = xfPivot(b)
       local bestD = math.max(tolerance(), 2.5) + 0.001
@@ -1654,7 +1689,8 @@ local function startGesture(x, y)
     select(hit.path, nil)
     local orig = {}
     for i, n in ipairs(s.paths[hit.path].nodes) do orig[i] = { n.x, n.y } end
-    s.press = { kind = "segment", hit = hit, before = before, sx = x, sy = y, orig = orig }
+    s.press = { kind = "segment", hit = hit, before = before, sx = x, sy = y, orig = orig,
+                pivot = s.paths[hit.path].pivot }
   else
     s.press = { kind = "pull", hit = addPoint(x, y), before = before }
   end
@@ -1718,14 +1754,11 @@ local function dragTo(x, y)
       fn = handleTransform(d, x, y) or function(px, py) return px, py end
     end
     mapNodes(s.paths, d.orig, fn)
-    -- A center the user put somewhere moves with the lines
-    if d.pivot then
-      local px, py = fn(d.pivot.x, d.pivot.y)
-      s.xf.pivot = { x = round(px), y = round(py) }
-    end
+    -- Centers the user put somewhere move with the lines
+    if d.allPivot then s.paths.pivot = mapPivot(d.allPivot, fn) end
     return
   elseif d.kind == "xfPivot" then
-    s.xf.pivot = snapPivot(d.box, x, y)
+    pivotOwner().pivot = snapPivot(d.box, x, y)
     return
   elseif d.kind == "xfOut" then
     return
@@ -1748,6 +1781,7 @@ local function dragTo(x, y)
       for i, m in ipairs(s.paths[d.hit.path].nodes) do
         m.x, m.y = d.orig[i][1] + x - d.sx, d.orig[i][2] + y - d.sy
       end
+      s.paths[d.hit.path].pivot = mapPivot(d.pivot, function(px, py) return px + x - d.sx, py + y - d.sy end)
     end
   end
 end
@@ -1865,8 +1899,11 @@ local function startSession(force)
       local same, dx, dy = compareWithLines(sprite, cel, paths)
       if same then
         -- If the cel was moved (e.g. with the Move tool), move the lines with it
+        local function shift(pv) return pv and { x = pv.x + dx, y = pv.y + dy } end
+        paths.pivot = shift(paths.pivot)
         for _, p in ipairs(paths) do
           for _, n in ipairs(p.nodes) do n.x, n.y = n.x + dx, n.y + dy end
+          p.pivot = shift(p.pivot)
         end
         original = serialize(paths)
       else
@@ -2028,10 +2065,7 @@ local function transformLines(s, makeFn)
   local fn = makeFn(x0, y0, x1, y1)
   edit(function()
     mapNodes(s.paths, orig, fn)
-    if s.xf and s.xf.pivot then
-      local px, py = fn(s.xf.pivot.x, s.xf.pivot.y)
-      s.xf.pivot = { x = round(px), y = round(py) }
-    end
+    if not s.paths[s.active] then s.paths.pivot = mapPivot(s.paths.pivot, fn) end
   end)
   askTimer:start()
 end
@@ -2043,7 +2077,8 @@ local function numericTransform(s)
   if not x0 then return end
   -- Around the center of the transform box if it was moved, else the middle
   local cx, cy = turnCenter(x0, y0, x1, y1)
-  if s.xf and s.xf.pivot then cx, cy = s.xf.pivot.x, s.xf.pivot.y end
+  local pv = pivotOwner().pivot
+  if pv then cx, cy = pv.x, pv.y end
   local before = snapshot()
   local orig = copyNodes(s.paths, list)
   local dlg
