@@ -44,6 +44,7 @@ local TEXT = {
     oneSide = "Move one handle only",
     guides = "Show guides",
     newShape = "New Shape",
+    duplicate = "Duplicate",
     deleteShape = "Delete Shape",
     deletePoint = "Delete Point",
     roundSharp = "Round/Sharp",
@@ -111,6 +112,7 @@ local TEXT = {
     oneSide = "ハンドルを片側だけ動かす",
     guides = "ガイドを表示",
     newShape = "新しい図形",
+    duplicate = "図形を複製",
     deleteShape = "図形を削除",
     deletePoint = "点を削除",
     roundSharp = "丸/角",
@@ -1146,6 +1148,7 @@ local function updateButtons()
   dlg:modify{ id = "antialias", enabled = not indexed }
   dlg:modify{ id = "pixelPerfect", enabled = indexed or not dlg.data.antialias }
   dlg:modify{ id = "closed", enabled = p ~= nil }
+  dlg:modify{ id = "duplicate", enabled = p ~= nil }
   dlg:modify{ id = "deleteLine", enabled = p ~= nil }
   dlg:modify{ id = "deletePoint", enabled = hasPoint }
   dlg:modify{ id = "roundSharp", enabled = hasPoint }
@@ -2070,6 +2073,25 @@ local function transformLines(s, makeFn)
   askTimer:start()
 end
 
+-- Copies the selected line a few pixels away (towards the inside of the
+-- canvas), right above the original, and selects the copy
+local function duplicateShape(s)
+  local p = s.paths[s.active]
+  if not p then return end
+  local copy = parse(serialize({ p }))[1]
+  local x0, y0, x1, y1 = pathBounds(s.paths, { s.active })
+  local dx = (x1 + 4 <= s.sprite.width - 1 or x0 - 4 < 0) and 4 or -4
+  local dy = (y1 + 4 <= s.sprite.height - 1 or y0 - 4 < 0) and 4 or -4
+  local at = s.active + 1
+  edit(function()
+    mapNodes({ copy }, copyNodes({ copy }, { 1 }), function(x, y) return x + dx, y + dy end)
+    table.insert(s.paths, at, copy)
+    s.drawing = false
+    select(at, nil)
+  end)
+  askTimer:start()
+end
+
 -- Asks for exact values, showing the result while they're typed
 local function numericTransform(s)
   local list = xfTargets()
@@ -2209,6 +2231,7 @@ openPanel = function()
                 refresh()
                 askTimer:start()
               end) }
+     :button{ id = "duplicate", text = T.duplicate, onclick = whenEditing(duplicateShape) }
      :button{ id = "deleteLine", text = T.deleteShape,
               onclick = whenEditing(function(s)
                 if not s.paths[s.active] then return end
