@@ -204,7 +204,7 @@ While you're drawing a line, clicks only add to that line: other lines can't be 
 
 There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
 
-While you edit, the points and handles are shown on the curve layer as bright green pixels: the points and handles of the selected line in bright green, the selected point in pale green, and the points of the other lines in darker green. They disappear when you leave the layer. Zoom in to work comfortably.
+While you edit, the points and handles are shown on the curve layer in bright green: each point is a 3×3 pixel square (pale green for the selected point, darker green for the points of other lines), and each handle is a dotted line ending in a single pixel. Clicking anywhere on a point's square grabs the point. They disappear when you leave the layer. Zoom in to work comfortably.
 
 | Panel | Description |
 | --- | --- |

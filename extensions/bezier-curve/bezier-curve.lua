@@ -674,7 +674,8 @@ local function linePixels(x0, y0, x1, y1, fn)
   end
 end
 
--- Adds the points and handles to `want`, on top of the lines
+-- Adds the points and handles to `want`, on top of the lines.
+-- Points are 3x3 squares, handle ends single pixels.
 local function addGuides(want)
   local s = S
   if panel and not panel.data.guides then return end
@@ -683,13 +684,19 @@ local function addGuides(want)
     local k = overlayKey(s.ov, x, y)
     if k then want[k] = v end
   end
+  local function square(x, y, v)
+    for dy = -1, 1 do
+      for dx = -1, 1 do put(x + dx, y + dy, v) end
+    end
+  end
   for pi, p in ipairs(s.paths) do
     if pi ~= s.active then
-      for _, n in ipairs(p.nodes) do put(n.x, n.y, g.other) end
+      for _, n in ipairs(p.nodes) do square(n.x, n.y, g.other) end
     end
   end
   local p = s.paths[s.active]
   if p then
+    local ends = {}
     for i, n in ipairs(p.nodes) do
       for _, side in ipairs({ "in", "out" }) do
         if hasHandle(n, side) and handleUsed(p, i, side) then
@@ -699,13 +706,15 @@ local function addGuides(want)
           linePixels(n.x, n.y, hx, hy, function(x, y, j)
             if j % 2 == 0 then put(x, y, g.handle) end
           end)
-          put(hx, hy, g.handle)
+          ends[#ends + 1] = { hx, hy }
         end
       end
     end
     for i, n in ipairs(p.nodes) do
-      put(n.x, n.y, i == s.selNode and g.selected or g.point)
+      square(n.x, n.y, i == s.selNode and g.selected or g.point)
     end
+    -- Handle ends go on top, so short handles stay visible next to their point
+    for _, e in ipairs(ends) do put(e[1], e[2], g.handle) end
   end
 end
 
@@ -870,8 +879,8 @@ local function hitTest(x, y)
   local tol = tolerance()
   local function grabbable(pi) return not s.drawing or pi == s.active end
   local best, bestD = nil, math.huge
-  local function consider(d, hit)
-    if d <= tol and d < bestD then best, bestD = hit, d end
+  local function consider(d, hit, limit)
+    if d <= (limit or tol) and d < bestD then best, bestD = hit, d end
   end
 
   -- Handles of the selected line (unless they're on their own point)
@@ -894,7 +903,9 @@ local function hitTest(x, y)
     local bias = pi == s.active and 0 or 0.02
     if grabbable(pi) then
       for i, n in ipairs(q.nodes) do
-        consider(dist(x, y, n.x, n.y) + bias, { kind = "anchor", path = pi, node = i })
+        -- The whole 3x3 square of a point can be clicked
+        consider(dist(x, y, n.x, n.y) + bias, { kind = "anchor", path = pi, node = i },
+                 math.max(tol, 1.5 + bias))
       end
     end
   end
