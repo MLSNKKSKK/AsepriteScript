@@ -206,7 +206,7 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 
 While you're drawing a shape, clicks only add to that shape: other shapes can't be grabbed, so you can start on another shape's point or cross over its line. Inside fills, clicks and drags add points too (a drag pulls out a curved point). After you finish the shape, clicking another shape's line selects it for editing.
 
-There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
+There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Saving applies the changes right away (the guides are never saved). After your first change, the sprite counts as modified, so closing its tab asks whether to save. Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
 
 While you edit, the points and handles are shown on the curve layer in bright green: each point is a hollow 3×3 pixel square with the line showing in its middle (pale green for the selected point, darker green for the points of other shapes), and each handle is a dotted line ending in a filled 3×3 square. Clicking anywhere on the square of a point or a handle end grabs it.
 

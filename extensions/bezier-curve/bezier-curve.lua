@@ -949,7 +949,9 @@ local function restoreOverlay(o)
   local img, base, w = o.img, o.base, o.w
   for k in pairs(o.touched) do
     local x, y = k % w, k // w
-    img:drawPixel(x, y, base:getPixel(x, y))
+    -- A pixel that no longer shows what the overlay put there was changed by
+    -- something else (e.g. painting in another view): leave it
+    if img:getPixel(x, y) == (o.cur[k] or o.mask) then img:drawPixel(x, y, base:getPixel(x, y)) end
   end
   o.touched, o.cur = {}, {}
 end
@@ -962,12 +964,14 @@ local panel = nil      -- the panel dialog, kept open between sessions
 local paused = nil     -- { layer = layer }: don't edit this layer until it's selected again
 local pending = nil    -- a command held back until the edit is applied
 local rerunning = false -- true while running the held command
+local saving = nil     -- the save command running (sessions wait for it)
 local removals = {}    -- event listeners to remove on the next tick
 local listeners = {}   -- app event listeners of the extension
 local lastSkip = nil   -- the last frame that couldn't be edited (to show the tip once)
 local clipboard = nil  -- shapes copied with the Copy button (serialized)
 local prefs = {}       -- plugin.preferences
 local askTimer, tickTimer
+local watchTimer        -- notices a switch to another view of the same sprite
 
 local function scheduleTick()
   if tickTimer and not tickTimer.isRunning then tickTimer:start() end
@@ -1094,6 +1098,12 @@ local function toggleRound(p, i)
     dx, dy = (n.x - prev.x) / 3, (n.y - prev.y) / 3
   else
     return
+  end
+  if dx == 0 and dy == 0 and nxt then
+    -- Both neighbours in the same place (e.g. a closed shape of 2 points):
+    -- the handles go across the line to the neighbour
+    dx, dy = -(nxt.y - n.y) / 3, (nxt.x - n.x) / 3
+    if dx == 0 and dy == 0 then return end
   end
   n.ox, n.oy, n.ix, n.iy = dx, dy, -dx, -dy
   n.smooth = dx ~= 0 or dy ~= 0
@@ -1449,7 +1459,6 @@ end
 -- Points are 3x3 squares, handle ends single pixels.
 local function addGuides(want)
   local s = S
-  if panel and not panel.data.guides then return end
   local g = s.guide
   local function put(x, y, v)
     local k = overlayKey(s.ov, x, y)
@@ -1508,6 +1517,8 @@ local function addGuides(want)
     end
     return
   end
+  -- (the transform box above is shown even with the guides off: it can be used)
+  if panel and not panel.data.guides then return end
 
   for pi, p in ipairs(s.paths) do
     if pi ~= s.active then
@@ -1582,6 +1593,12 @@ end
 
 local function redraw()
   local s = S
+  if s.needsSetup and serialize(s.paths) ~= s.original then
+    -- The first change: now the cel is made to cover the canvas
+    restoreOverlay(s.ov)
+    s.needsSetup = nil
+    prepareCel()
+  end
   if not s.ov then
     if #s.paths == 0 then return end
     prepareCel()   -- the first point on a frame without a cel
@@ -1609,7 +1626,7 @@ end
 
 local function snapshot()
   local s = S
-  return { data = serialize(s.paths), active = s.active, sel = s.selNode }
+  return { data = serialize(s.paths), active = s.active, sel = s.selNode, drawing = s.drawing }
 end
 
 -- Adds an undo step if the lines changed since `before`
@@ -1645,12 +1662,28 @@ local function edit(fn, mergeKey)
   refresh()
 end
 
+-- A drag cut short (e.g. by a key command while the mouse button is down):
+-- what it did so far is kept as a step
+local function endPress()
+  local s = S
+  local d = s and s.press
+  if not d then return end
+  s.press = nil
+  if d.kind == "place" then
+    s.placing = nil
+    select(d.path, nil)
+  end
+  pushUndo(d.before)
+end
+
 local function restore(snap)
   local s = S
   s.paths = parse(snap.data)
   s.active, s.selNode = snap.active, snap.sel
   if not s.paths[s.active] then s.active, s.selNode = nil, nil end
   if s.active and s.selNode and not s.paths[s.active].nodes[s.selNode] then s.selNode = nil end
+  s.drawing = snap.drawing or false
+  if s.xf then s.selNode = nil end
   s.lastMerge, s.press = nil, nil
   syncFields()
   refresh()
@@ -2024,7 +2057,10 @@ local function dragTo(x, y)
   elseif d.kind == "xfOut" then
     return
   end
-  local n = d.hit.node and s.paths[d.hit.path].nodes[d.hit.node]
+  -- The line or point may be gone (e.g. deleted with a key during the drag)
+  local q = d.hit and s.paths[d.hit.path]
+  if not q or (d.hit.node and not q.nodes[d.hit.node]) then return end
+  local n = d.hit.node and q.nodes[d.hit.node]
   if d.kind == "anchor" then
     n.x, n.y = d.x + x - d.sx, d.y + y - d.sy
   elseif d.kind == "handle" then
@@ -2134,9 +2170,28 @@ local function onCancel()
   askTimer:start()
 end
 
+-- Runs a mouse handler; if it fails, editing goes on (and the error is shown)
+local function guarded(fn)
+  return function(ev)
+    local ok, err = pcall(fn, ev)
+    if not ok then
+      if S and not S.finished then
+        S.press = nil
+        askTimer:start()
+      end
+      print(T.title .. ": " .. tostring(err))
+    end
+  end
+end
+
 local function ask()
   local s = S
   if not s or s.finished or app.editor ~= s.editor then return end
+  -- Asking again ends the drag in progress (Aseprite drops it), so keep it
+  if s.press then
+    endPress()
+    refresh()
+  end
   local p = s.paths[s.active]
   local n = p and s.selNode and p.nodes[s.selNode]
   -- `point` outlines the selected point
@@ -2148,7 +2203,7 @@ local function ask()
     title, n = T.hintPlace, nil
   end
   s.editor:askPoint{ title = title, point = n and Point(n.x, n.y) or nil,
-                     onchange = onChange, onclick = onClick, oncancel = onCancel }
+                     onchange = guarded(onChange), onclick = guarded(onClick), oncancel = guarded(onCancel) }
 end
 
 ------------------------------------------------------------------------
@@ -2213,12 +2268,19 @@ local function startSession(force)
   disableTileDoubleClick()
 
   if cel then
-    if coversCanvas(sprite, cel) then
+    if original then
+      -- The setup step (a cel covering the canvas) is made at the first
+      -- change: just looking at the frame must not add an undo step (it
+      -- would drop the redo history). The step also marks the sprite as
+      -- changed, so closing it asks to save the edit. Until then, the
+      -- guides show inside the cel.
       s.ov = newOverlay(cel)
+      s.needsSetup = true
     else
       prepareCel()
     end
   end
+  watchTimer:start()
 
   s.changeId = sprite.events:on("change", function(ev)
     if s.finished or s.busy then return end
@@ -2243,13 +2305,19 @@ local function finishSession(canUndo)
   s.finished = true
   s.press = nil
   askTimer:stop()
+  watchTimer:stop()
   if s.changeId then
     -- Listeners can't be removed while an event is being sent
-    removals[#removals + 1] = { s.sprite.events, s.changeId }
+    pcall(function() removals[#removals + 1] = { s.sprite.events, s.changeId } end)
     scheduleTick()
   end
 
   local ok, err = pcall(function()
+    -- A closed sprite (e.g. its tab was closed) is left alone: it has no
+    -- view any more, so nothing here could be done on it
+    local open = false
+    for _, sp in ipairs(app.sprites) do if sp == s.sprite then open = true end end
+    if not open then return end
     if not pcall(function() return s.sprite.width end) then return end   -- the sprite was closed
 
     -- Work on the edited sprite even if the user moved somewhere else
@@ -2443,7 +2511,9 @@ local function placeShapeDialog(s)
      :button{ id = "ok", text = T.ok, focus = true }
      :button{ id = "cancel", text = T.cancel }
   update()
+  s.modal = true
   dlg:show()
+  s.modal = nil
   if S ~= s or s.finished or not dlg.data.ok then return end
   local d = dlg.data
   local placing = { kind = kinds[d.kind] or "ellipse", rounding = d.rounding, square = d.square,
@@ -2497,7 +2567,9 @@ local function numericTransform(s)
      :number{ id = "shearY", label = T.shearY, text = "0", decimals = 1, onchange = apply }
      :button{ id = "ok", text = T.ok, focus = true }
      :button{ id = "cancel", text = T.cancel }
+  s.modal = true
   dlg:show()
+  s.modal = nil
   if S ~= s or s.finished then return end
   if dlg.data.ok then
     apply()
@@ -2554,6 +2626,10 @@ openPanel = function()
   local dlg
   dlg = Dialog{ title = T.title, onclose = function()
     if panel ~= dlg then return end   -- closed by closePanel()
+    pcall(function()
+      local b = dlg.bounds
+      prefs.panelX, prefs.panelY = b.x, b.y
+    end)
     panel = nil
     stopEditing()
   end }
@@ -2705,13 +2781,17 @@ end
 -- moved away, runs a held command, and starts a session on a curve layer
 local function tick()
   tickTimer:stop()
+  -- Nothing happens while a held command runs again (its dialogs, e.g. Save
+  -- As, keep the timers going): a session there would draw its guides into
+  -- the picture being saved or changed
+  if rerunning or saving then return end
 
   local list = removals
   removals = {}
   for _, r in ipairs(list) do pcall(function() r[1]:off(r[2]) end) end
 
   local s = S
-  if s and not s.finished then
+  if s and not s.finished and not s.modal then
     local moved = app.sprite ~= s.sprite or app.layer ~= s.layer or app.editor ~= s.editor
                   or not app.frame or app.frame.frameNumber ~= s.frameNumber
     if moved or s.externalChange or pending then finishSession(true) end
@@ -2729,11 +2809,12 @@ local function tick()
       restoreTileDoubleClick()
       closePanel()
     end
-    local run = app.command[cmd.name]
-    if run then
+    local ok, run = pcall(function() return app.command[cmd.name] end)
+    if ok and run then
       rerunning = true
       pcall(run, cmd.params)
       rerunning = false
+      scheduleTick()
     end
   end
 
@@ -2754,15 +2835,36 @@ local function tick()
   end
 end
 
+local SAVE_COMMANDS = { SaveFile = true, SaveFileAs = true, SaveFileCopyAs = true }
+
 local function onBeforeCommand(ev)
   local s = S
   local name = ev.name
+  -- A command after a save that failed (no "aftercommand" came)
+  if saving and not SAVE_COMMANDS[name] then saving = nil end
   if not s or s.finished then
-    -- Playing again stops the playback: editing can start again
-    if paused and paused.play and name == "PlayAnimation" and not rerunning then paused = nil end
+    if name == "PlayAnimation" and not rerunning then
+      if paused and paused.play then
+        -- Playing again stops the playback: editing can start again
+        paused = nil
+      elseif isCurveLayer(app.layer) then
+        -- Don't start editing while the animation plays (e.g. from a frame
+        -- that was changed by hand)
+        paused = { layer = app.layer, play = true }
+      end
+    end
     return
   end
   local here = app.sprite == s.sprite
+  if here and s.press and not VIEW_COMMANDS[name] then endPress() end
+  if SAVE_COMMANDS[name] then
+    -- Saving applies the edit right away and lets the command run (holding
+    -- it back would make "Save changes?" on closing a tab ask again and
+    -- again). No session starts until it's done.
+    finishSession(false)
+    saving = name
+    return
+  end
   if here and name == "Undo" and #s.undoStack > 0 then
     undo()
     ev.stopPropagation()
@@ -2893,6 +2995,11 @@ function init(plugin)
     ask()
   end }
   tickTimer = Timer{ interval = 0.01, ontick = tick }
+  watchTimer = Timer{ interval = 0.25, ontick = function()
+    local s = S
+    if not s or s.finished then watchTimer:stop()
+    elseif app.editor ~= s.editor then scheduleTick() end
+  end }
 
   local function hasSprite() return app.sprite ~= nil end
   local function onCurveLayer() return isCurveLayer(app.layer) end
@@ -2911,7 +3018,10 @@ function init(plugin)
 
   listeners = {
     app.events:on("beforecommand", onBeforeCommand),
-    app.events:on("aftercommand", scheduleTick),
+    app.events:on("aftercommand", function(ev)
+      if saving and ev.name == saving then saving = nil end
+      scheduleTick()
+    end),
     app.events:on("sitechange", scheduleTick),
   }
   scheduleTick()
@@ -2931,4 +3041,7 @@ function exit(plugin)
   listeners = {}
   if askTimer then askTimer:stop() end
   if tickTimer then tickTimer:stop() end
+  if watchTimer then watchTimer:stop() end
+  for _, r in ipairs(removals) do pcall(function() r[1]:off(r[2]) end) end
+  removals = {}
 end
