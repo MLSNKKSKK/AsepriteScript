@@ -35,7 +35,7 @@ local TEXT = {
     color = "   Color",
     width = "   Width",
     pixelPerfect = "Pixel-perfect (width 1)",
-    antialias = "Antialias",
+    antialias = "Antialias (smooth edges)",
     antialiasIndexed = "Antialias (RGB and Grayscale only)",
     closed = "Connect the ends",
     stroke = "Draw the line",
@@ -106,7 +106,7 @@ local TEXT = {
     color = "　色",
     width = "　太さ",
     pixelPerfect = "ピクセルパーフェクト(太さ1のとき)",
-    antialias = "アンチエイリアス",
+    antialias = "アンチエイリアス(縁をなめらかに)",
     antialiasIndexed = "アンチエイリアス(RGB・グレースケールのみ)",
     closed = "始点と終点をつなぐ",
     stroke = "線を描く",
@@ -2249,22 +2249,17 @@ openPanel = function()
      :newrow()
      :button{ id = "copy", text = T.copy, onclick = whenEditing(copyShapes) }
      :button{ id = "paste", text = T.paste, onclick = whenEditing(pasteShapes) }
-     -- The shape: settings for the whole shape, then its line and its fill
+     -- The shape: its antialiasing, then its line and its fill
      :separator{ id = "styleSep", text = T.nextShape }
-     :check{ id = "closed", label = "", text = T.closed, selected = false,
+     :check{ id = "antialias", label = "", text = T.antialias, selected = prefs.antialias == true,
              onclick = function()
-               changeStyle("closed", function(p) p.closed = dlg.data.closed end)
+               changeStyle("antialias", function(p) p.antialias = dlg.data.antialias end)
+               updateButtons()
              end }
      :separator{ id = "lineSep", text = T.lineGroup }
      :check{ id = "stroke", label = "", text = T.stroke, selected = true,
              onclick = function()
                changeStyle("stroke", function(p) p.stroke = dlg.data.stroke end)
-             end }
-     -- (smooths the edges of the fill too)
-     :check{ id = "antialias", text = T.antialias, selected = prefs.antialias == true,
-             onclick = function()
-               changeStyle("antialias", function(p) p.antialias = dlg.data.antialias end)
-               updateButtons()
              end }
      :color{ id = "color", label = T.color, color = app.fgColor,
              onchange = function()
@@ -2293,6 +2288,10 @@ openPanel = function()
      :check{ id = "guides", text = T.guides, selected = true,
              onclick = whenEditing(function() refresh() end) }
      :separator{}
+     :check{ id = "closed", label = "", text = T.closed, selected = false,
+             onclick = function()
+               changeStyle("closed", function(p) p.closed = dlg.data.closed end)
+             end }
      :button{ id = "deletePoint", text = T.deletePoint, onclick = whenEditing(deleteSelectedPoint) }
      :button{ id = "roundSharp", text = T.roundSharp,
               onclick = whenEditing(function(s)
