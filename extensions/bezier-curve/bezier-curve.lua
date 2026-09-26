@@ -225,7 +225,7 @@ local TEXT = {
     transformSelected = "変形(選択中の図形)",
     transformBox = "変形ボックス",
     endTransform = "変形を終える",
-    numeric = "数値で変形...",
+    numeric = "数値で変形…",
     flipH = "左右反転",
     flipV = "上下反転",
     rotateLeft = "左に90°回転",
@@ -301,7 +301,7 @@ local function colorToTable(c)
 end
 
 local function tableToColor(sprite, t)
-  if sprite.colorMode == ColorMode.INDEXED then return Color(t.index) end
+  if sprite.colorMode == ColorMode.INDEXED then return Color{ index = t.index } end
   return Color{ r = t.r, g = t.g, b = t.b, a = t.a }
 end
 
@@ -519,14 +519,26 @@ local function fillPath(sprite, p, fn)
     if q[2] > bottom then bottom = q[2] end
   end
   local W = sprite.width
-  for y = math.max(0, math.ceil(top)), math.min(sprite.height - 1, floor(bottom)) do
+  local y0, y1 = math.max(0, math.ceil(top)), math.min(sprite.height - 1, floor(bottom))
+  -- The edges listed under each row they can cross, in their order (so the
+  -- result is the same as looking at all of them, only faster)
+  local rows = {}
+  for i = 1, n do
+    local a, b = pts[i], pts[i % n + 1]
+    for y = math.max(y0, floor(math.min(a[2], b[2]))), math.min(y1, math.ceil(math.max(a[2], b[2]))) do
+      local list = rows[y]
+      if not list then list = {}; rows[y] = list end
+      list[#list + 1] = i
+    end
+  end
+  for y = y0, y1 do
     -- Look just above and just below the row's center, so pixels on the
     -- top and bottom edges of the shape are filled too
     local done = {}
-    for _, yy in ipairs({ y - 0.001, y + 0.001 }) do
+    for _, yy in ipairs(rows[y] and { y - 0.001, y + 0.001 } or {}) do
       -- Where the edges cross, and in which direction
       local xs = {}
-      for i = 1, n do
+      for _, i in ipairs(rows[y]) do
         local a, b = pts[i], pts[i % n + 1]
         if (a[2] <= yy and b[2] > yy) or (b[2] <= yy and a[2] > yy) then
           local t = (yy - a[2]) / (b[2] - a[2])
@@ -601,13 +613,20 @@ local function coverPath(sprite, p, fn)
   local function visit(ax, ay, bx, by)
     local dx, dy = bx - ax, by - ay
     local l2 = dx * dx + dy * dy
-    for y = math.max(0, math.ceil(math.min(ay, by) - reach)), math.min(H - 1, floor(math.max(ay, by) + reach)) do
-      for x = math.max(0, math.ceil(math.min(ax, bx) - reach)), math.min(W - 1, floor(math.max(ax, bx) + reach)) do
-        local u = 0
-        if l2 > 0 then u = math.max(0, math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) end
-        local ex, ey = x - ax - u * dx, y - ay - u * dy
-        local d2, k = ex * ex + ey * ey, y * W + x
-        if not near[k] or d2 < near[k] then near[k] = d2 end
+    -- A long piece is looked at in parts, so only the pixels near it are
+    -- checked (the distance is still to the whole piece)
+    local parts = math.max(1, math.ceil(sqrt(l2) / 8))
+    for j = 1, parts do
+      local px0, py0 = ax + dx * (j - 1) / parts, ay + dy * (j - 1) / parts
+      local px1, py1 = ax + dx * j / parts, ay + dy * j / parts
+      for y = math.max(0, math.ceil(math.min(py0, py1) - reach)), math.min(H - 1, floor(math.max(py0, py1) + reach)) do
+        for x = math.max(0, math.ceil(math.min(px0, px1) - reach)), math.min(W - 1, floor(math.max(px0, px1) + reach)) do
+          local u = 0
+          if l2 > 0 then u = math.max(0, math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) end
+          local ex, ey = x - ax - u * dx, y - ay - u * dy
+          local d2, k = ex * ex + ey * ey, y * W + x
+          if not near[k] or d2 < near[k] then near[k] = d2 end
+        end
       end
     end
   end
@@ -752,8 +771,8 @@ local function nearestIndex(sprite, r, g, b)
   local pal = sprite.palettes[1]
   local best, bestD = 0, math.huge
   for i = 0, #pal - 1 do
-    if i ~= sprite.transparentColor then
-      local c = pal:getColor(i)
+    local c = pal:getColor(i)
+    if i ~= sprite.transparentColor and c.alpha >= 128 then   -- guides must be visible
       local d = (c.red - r) ^ 2 + (c.green - g) ^ 2 + (c.blue - b) ^ 2
       if d < bestD then best, bestD = i, d end
     end
@@ -799,8 +818,8 @@ local function guideStyle(sprite, layer, frameNumber)
     local pal = sprite.palettes[1]
     local dark, light, darkL, lightL = 0, 0, math.huge, -1
     for i = 0, #pal - 1 do
-      if i ~= sprite.transparentColor then
-        local c = pal:getColor(i)
+      local c = pal:getColor(i)
+      if i ~= sprite.transparentColor and c.alpha >= 128 then
         local l = grayOf{ r = c.red, g = c.green, b = c.blue }
         if l < darkL then dark, darkL = i, l end
         if l > lightL then light, lightL = i, l end
@@ -1594,9 +1613,18 @@ local function snapshot()
 end
 
 -- Adds an undo step if the lines changed since `before`
+-- Rounds the lines the way they are saved (handles to 2 decimals), so what
+-- is shown while editing is exactly what gets saved and checked later
+local function normalize()
+  local s = S
+  local data = serialize(s.paths)
+  s.paths = parse(data)
+  return data
+end
+
 local function pushUndo(before)
   local s = S
-  if before.data == serialize(s.paths) then return false end
+  if before.data == normalize() then return false end
   s.undoStack[#s.undoStack + 1] = before
   s.redoStack = {}
   return true
@@ -1611,6 +1639,8 @@ local function edit(fn, mergeKey)
   fn()
   if before then
     s.lastMerge = pushUndo(before) and mergeKey or nil
+  else
+    normalize()
   end
   refresh()
 end
@@ -2247,7 +2277,7 @@ local function finishSession(canUndo)
           if #s.paths == 0 then
             if c then s.sprite:deleteCel(c) end
           else
-            local img = renderPaths(s.sprite, s.paths)
+            local img = renderPaths(s.sprite, parse(result))   -- exactly what is saved
             if c then
               c.image = img
               c.position = Point(0, 0)
