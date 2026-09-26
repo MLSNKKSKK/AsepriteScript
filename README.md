@@ -2,7 +2,7 @@
 
 English | [日本語](README.ja.md)
 
-A small collection of [Aseprite](https://www.aseprite.org/) scripts.
+A small collection of [Aseprite](https://www.aseprite.org/) scripts, plus one extension.
 
 | Script | What it does |
 | --- | --- |
@@ -10,7 +10,7 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
 | [Import GIF as Layer](#import-gif-as-layer) | Imports a GIF animation into the open sprite as a layer. |
 | [Replace Color in All Layers](#replace-color-in-all-layers) | Replaces one color with another in every layer and frame at once. |
 | [Create Effect Layer](#create-effect-layer) | Adds a color layer shaped like the active layer, with a blend mode such as Multiply. |
-| [Bezier Curve](#bezier-curve) | Draws lines with Bezier curves right on the canvas, and lets you edit them again later. |
+| [Bezier Curve](#bezier-curve) (extension) | Adds curve layers: lines drawn with Bezier curves that you can edit on the canvas at any time. |
 
 ## Installation
 
@@ -19,7 +19,6 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
    - [`Import GIF as Layer.lua`](Import%20GIF%20as%20Layer.lua)
    - [`Replace Color in All Layers.lua`](Replace%20Color%20in%20All%20Layers.lua)
    - [`Create Effect Layer.lua`](Create%20Effect%20Layer.lua)
-   - [`Bezier Curve.lua`](Bezier%20Curve.lua)
 
    To get them all at once, use **Code > Download ZIP** on this page.
 2. In Aseprite, choose **File > Scripts > Open Scripts Folder**.
@@ -29,6 +28,13 @@ A small collection of [Aseprite](https://www.aseprite.org/) scripts.
 The scripts now appear under **File > Scripts**. You can also give them keyboard shortcuts in **Edit > Keyboard Shortcuts**.
 
 The [`ja`](ja) folder has Japanese versions of the same scripts. You only need one language version of each.
+
+Bezier Curve is an extension, and is installed differently:
+
+1. Download [`bezier-curve.aseprite-extension`](extensions/bezier-curve.aseprite-extension).
+2. Double-click it (Windows, macOS), or in Aseprite choose **Edit > Preferences > Extensions > Add Extension** and pick the file.
+
+It stays installed and is ready every time Aseprite starts. Its menus and messages are in English or Japanese, following Aseprite's language setting. To remove it, use **Uninstall** in the same Extensions page.
 
 ## New Sprite from Preset
 
@@ -165,7 +171,7 @@ When run without the UI, the script uses the foreground color, Multiply and full
 
 ## Bezier Curve
 
-Draws lines with Bezier curves right on the canvas, on a separate "curve layer". The lines stay editable: run the script again later to move the points, change how the lines bend, or change their color and width.
+An extension that adds **curve layers**. Lines on a curve layer are drawn with Bezier curves and stay editable: select the layer and you can move the points, change how the lines bend, or change their color and width right on the canvas, at any time.
 
 - Click and drag on the canvas, like the Pen tool in drawing apps. A small panel holds the settings
 - Several lines per layer, each with its own color and width (1–32 px, round brush)
@@ -173,11 +179,12 @@ Draws lines with Bezier curves right on the canvas, on a separate "curve layer".
 - Closed shapes (connect the last point to the first)
 - Each frame has its own lines
 - Works with RGB, Grayscale and Indexed sprites
-- Applying is a single undo step (**Edit > Undo** / Ctrl+Z)
 
 ### Usage
 
-Select the layer you want the lines to go above, then run **File > Scripts > Bezier Curve**. A small panel opens at the right edge of the window and you can draw on the canvas right away. Zooming with the mouse wheel and scrolling with Space+drag work as usual.
+Choose **Layer > New > New Curve Layer** (also in the right-click menu of the layers in the timeline). A layer named `Curve 1` is added right above the active layer.
+
+While a curve layer is selected, you edit its lines directly on the canvas, and a small panel opens at the right edge of the window. Zooming with the mouse wheel and scrolling with Space+drag work as usual.
 
 | On the canvas | What it does |
 | --- | --- |
@@ -189,10 +196,12 @@ Select the layer you want the lines to go above, then run **File > Scripts > Bez
 | Drag a line | Moves the whole line. |
 | Click a point | Selects it (it gets a white outline). |
 | **Delete** / **Backspace** | Deletes the selected point. |
-| **Ctrl+Z** / **Ctrl+Y** | Undo / redo your changes to the lines. |
+| **Ctrl+Z** / **Ctrl+Y** | Undo / redo. Your recent changes to the lines are undone first, then Aseprite's own history. |
 | **Esc** | Cancels the drag in progress, or deselects the line. |
 
-While you edit, the points and handles are shown as colored pixels on a temporary layer called `Bezier Curve guides (editing)`: magenta for the points of the selected line, yellow for the selected point, cyan for the handles, and purple for the points of the other lines. They are removed when you finish. Zoom in to work comfortably.
+There is no "apply" step. When you select another layer or frame, or use another command (such as saving or a filter), the changes are put in Aseprite's undo history as a single step (**Edit > Undo** / Ctrl+Z). Selecting the curve layer again lets you keep editing, and so does coming back after saving and reopening the file.
+
+While you edit, the points and handles are shown on the curve layer as colored pixels: magenta for the points of the selected line, yellow for the selected point, cyan for the handles, and purple for the points of the other lines. They disappear when you leave the layer. Zoom in to work comfortably.
 
 | Panel | Description |
 | --- | --- |
@@ -206,33 +215,32 @@ While you edit, the points and handles are shown as colored pixels on a temporar
 | **Delete Line** / **Delete Point** | Deletes the selected line / point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
 | **Undo** / **Redo** | Undo / redo your changes to the lines. |
-| **Apply** / **Cancel** | Finishes the edit. **Cancel** throws away the changes. |
+| **Stop Editing** | Stops editing the layer so you can use Aseprite's tools on it (for example the Move tool). Closing the panel does the same. Selecting the layer again, or **Layer > Edit Curves**, starts editing again. |
 
 When a line is selected, the fields show its settings and changing them changes that line. When no line is selected, they are the settings for the next new line.
 
-Click **Apply** (or close the panel). The first time, a new layer named `Curve 1` is created right above the active layer.
+Editing also pauses while the animation plays, and starts again when you stop it with Enter.
 
-The edit is also applied automatically when you go to another frame or sprite, or use any other command (such as saving), like Aseprite's Text tool does. View commands like zoom and grid don't end the edit.
+### Notes
 
-### Editing the lines later
-
-Select the curve layer, go to the frame you want to change and run **Bezier Curve** again. The lines of that frame become editable on the canvas.
-
-- The lines are saved in the cel, so they're kept in `.aseprite` files. Other formats such as PNG only keep the pixels.
-- If you move the curve layer with the Move tool, the lines move with it.
+- The lines are saved in the cels, so they're kept in `.aseprite` files. Other formats such as PNG only keep the pixels.
+- If you move a curve layer with the Move tool, the lines move with it.
 - New frames and copied cels keep their lines, so you can copy a frame and adjust the lines for the next pose. Linked cels share the same lines.
-- Anything painted by hand on the curve layer is lost when you apply an edit, because the frame is redrawn from the lines (the script warns you first). Paint on other layers instead.
-- The English and Japanese versions use the same data, so either one can edit lines made with the other.
+- If a frame of a curve layer is changed some other way (painted over by hand, a filter, and so on), it isn't editable right away, so those changes aren't lost by accident. **Layer > Edit Curves** asks first, then redraws the frame from the lines.
+- Curve layers made with the earlier script version of Bezier Curve work as they are. Remove the old `Bezier Curve.lua` from your scripts folder.
+- The points and handles are drawn on the curve layer itself, so layers above it can hide them, and the layer's opacity and blend mode apply to them.
 
 ### Limitations
 
 Aseprite scripts can't draw on top of the canvas or tell which mouse button or modifier keys were used on it. That's why the points and handles are shown as pixels, and why deleting points and making sharp corners use the panel or the Delete key instead of right-click and Alt. Handles snap to whole pixels.
 
-A second click right after the first can be taken as a double-click and ignored, so leave a short pause between clicks when placing points close together. (While editing, the script turns off **Select a grid tile with double-click** in the preferences, and turns it back on when you finish.)
+A second click right after the first can be taken as a double-click and ignored, so leave a short pause between clicks when placing points close together. (While editing, the extension turns off **Select a grid tile with double-click** in the preferences, and turns it back on afterwards.)
+
+To rebuild the extension file from the [`extensions/bezier-curve`](extensions/bezier-curve) folder, run `python3 extensions/build.py`.
 
 ## Requirements
 
-Aseprite with Lua scripting support (v1.3 or later recommended). Bezier Curve needs v1.3 or later.
+Aseprite with Lua scripting support (v1.3 or later recommended). The Bezier Curve extension needs v1.3 or later.
 
 ## License
 
