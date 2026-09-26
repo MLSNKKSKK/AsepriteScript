@@ -24,7 +24,7 @@ local TEXT = {
     hint = "Bezier Curve: click to add points, drag points or handles to edit them",
     hintDrawing = "Bezier Curve: drawing a shape (other shapes can't be grabbed). Click its first point to close it; Esc, Enter or click its last point: done",
     help1 = "Click to add points, drag points or handles to bend.",
-    help2 = "Click a line to select it, again to add a point. Del: delete the point.",
+    help2 = "Click a line to select it, again to add a point. Del: delete the selected point or shape.",
     nextShape = "Next Shape",
     selectedShape = "Selected Shape",
     drawingShape = "Drawing a Shape (Esc/Enter: done)",
@@ -97,7 +97,7 @@ local TEXT = {
     hint = "ベジェ曲線: クリックで点を追加、点やハンドルをドラッグで編集",
     hintDrawing = "ベジェ曲線: 図形を描いています(ほかの図形はつかめません)。始点をクリックで閉じる、Esc・Enter・最後の点をクリックで終了",
     help1 = "クリックで点を追加、点やハンドルをドラッグで曲げる",
-    help2 = "線をクリックで選択(選択中なら点を追加) / Del: 点を削除",
+    help2 = "線をクリックで選択(選択中なら点を追加) / Del: 選択中の点か図形を削除",
     nextShape = "次に描く図形",
     selectedShape = "選択中の図形",
     drawingShape = "図形を描画中(Esc / Enter で終了)",
@@ -1186,7 +1186,10 @@ local function deleteNode(pi, ni)
       s.active = s.active - 1
     end
   elseif s.active == pi and s.selNode then
-    if s.selNode == ni then s.selNode = nil elseif s.selNode > ni then s.selNode = s.selNode - 1 end
+    -- The point before a deleted selected point gets selected, so deleting
+    -- again goes on with the points (not the whole shape)
+    if s.selNode == ni then s.selNode = math.max(1, ni - 1)
+    elseif s.selNode > ni then s.selNode = s.selNode - 1 end
   end
 end
 
@@ -1504,6 +1507,20 @@ local function deleteSelectedPoint()
     edit(function() deleteNode(s.active, s.selNode) end)
     askTimer:start()
   end
+end
+
+local function deleteSelectedShape()
+  local s = S
+  if not s.paths[s.active] then return end
+  local pi = s.active
+  edit(function()
+    table.remove(s.paths, pi)
+    s.drawing = false
+    s.xf = nil
+    select(nil, nil)
+  end)
+  syncFields()
+  askTimer:start()
 end
 
 -- Stops drawing the line: the next click on an empty spot starts a new line
@@ -1845,9 +1862,10 @@ local function endGesture(x, y, dragged)
     s.xf = nil
     syncFields()
   elseif d.closes and clicked then
-    -- Closed: the shape is finished (and stays selected)
+    -- Closed: the shape is finished (and stays selected, as a whole)
     s.paths[d.hit.path].closed = true
     s.drawing = false
+    s.selNode = nil
     syncFields()
   end
   pushUndo(d.before)
@@ -2283,19 +2301,7 @@ openPanel = function()
                 refresh()
                 askTimer:start()
               end) }
-     :button{ id = "deleteLine", text = T.deleteShape,
-              onclick = whenEditing(function(s)
-                if not s.paths[s.active] then return end
-                local pi = s.active
-                edit(function()
-                  table.remove(s.paths, pi)
-                  s.drawing = false
-                  s.xf = nil
-                  select(nil, nil)
-                end)
-                syncFields()
-                askTimer:start()
-              end) }
+     :button{ id = "deleteLine", text = T.deleteShape, onclick = whenEditing(deleteSelectedShape) }
      :newrow()
      :button{ id = "copy", text = T.copy, onclick = whenEditing(copyShapes) }
      :button{ id = "paste", text = T.paste, onclick = whenEditing(pasteShapes) }
@@ -2345,7 +2351,9 @@ openPanel = function()
                local s = S
                if s and not s.finished and s.drawing and dlg.data.closed and s.paths[s.active] then
                  s.drawing = false
+                 s.selNode = nil
                  syncFields()
+                 refresh()
                  askTimer:start()
                end
              end }
@@ -2495,8 +2503,13 @@ local function onBeforeCommand(ev)
     end
     ev.stopPropagation()
   elseif here and name == "Clear" then
-    -- Delete/Backspace deletes the selected point instead of clearing pixels
-    deleteSelectedPoint()
+    -- Delete/Backspace deletes the selected point, or the selected shape
+    -- when no point is selected (never the pixels)
+    if s.paths[s.active] and not s.selNode then
+      deleteSelectedShape()
+    else
+      deleteSelectedPoint()
+    end
     ev.stopPropagation()
   elseif not VIEW_COMMANDS[name] then
     -- Hold the command back, apply the edit, then run the command again.

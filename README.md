@@ -199,7 +199,7 @@ While a curve layer is selected, you edit its lines directly on the canvas, and 
 | Click inside a filled shape | Selects the shape (the one on top where fills overlap). To start a new shape on top of a fill, press **New Shape** first. |
 | Drag a line, or inside a fill | Moves the whole shape. |
 | Click a point | Selects it (it gets a white outline). |
-| **Delete** / **Backspace** | Deletes the selected point. |
+| **Delete** / **Backspace** | Deletes the selected point, and selects the one before it (so pressing it again goes on with the points). When a shape is selected without a point (for example after clicking its line or fill, or closing it), deletes the whole shape. |
 | **Ctrl+Z** / **Ctrl+Y** | Undo / redo. Your recent changes to the lines are undone first, then Aseprite's own history. |
 | **Esc** | Cancels the drag in progress, or finishes / deselects the shape. |
 
