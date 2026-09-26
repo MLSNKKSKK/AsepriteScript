@@ -675,22 +675,9 @@ local function guidePixel(sprite, r, g, b)
   return pc.rgba(r, g, b, 255)
 end
 
--- Brightness (0-255) and alpha of a pixel value in the sprite's color mode
-local function pixelLuma(sprite, v)
-  if sprite.colorMode == ColorMode.GRAY then
-    return pc.grayaV(v), pc.grayaA(v)
-  elseif sprite.colorMode == ColorMode.INDEXED then
-    if v == sprite.transparentColor then return 0, 0 end
-    local c = sprite.palettes[1]:getColor(v)
-    return grayOf{ r = c.red, g = c.green, b = c.blue }, c.alpha
-  end
-  return grayOf{ r = pc.rgbaR(v), g = pc.rgbaG(v), b = pc.rgbaB(v) }, pc.rgbaA(v)
-end
-
 -- Colors of the guides. In RGB (or Indexed with a green in the palette) they
 -- are bright green. Grayscale and other palettes can't show green, so the
--- guides are black and white there: points get a two-tone outline, and
--- handle ends take whichever of black or white stands out from the picture.
+-- guides are black and white there, mixed so they stand out on any picture.
 local function guideStyle(sprite, layer, frameNumber)
   local mode = sprite.colorMode
   local green = mode == ColorMode.RGB
@@ -727,17 +714,6 @@ local function guideStyle(sprite, layer, frameNumber)
     style.otherRing = nearestIndex(sprite, 64, 64, 64)
     style.otherCenter = nearestIndex(sprite, 200, 200, 200)
   end
-
-  -- The picture without the curve layer, to pick black or white for single
-  -- pixels. (Hiding a layer outside a transaction adds no undo step.)
-  pcall(function()
-    local bg = Image(sprite.width, sprite.height, ColorMode.RGB)
-    local visible = layer.isVisible
-    layer.isVisible = false
-    bg:drawSprite(sprite, frameNumber, Point(0, 0))
-    layer.isVisible = visible
-    style.bg = bg
-  end)
   return style
 end
 
@@ -1298,6 +1274,16 @@ local function addGuides(want)
       for dx = -1, 1 do put(x + dx, y + dy, (dx == 0 and dy == 0) and (center or ring) or ring) end
     end
   end
+  -- A hollow 3x3 square (a point): `corner` at the corners, `side` between
+  -- them; the middle shows the line under it
+  local function hollow(x, y, corner, side)
+    for dy = -1, 1 do
+      for dx = -1, 1 do
+        if dx ~= 0 and dy ~= 0 then put(x + dx, y + dy, corner)
+        elseif dx ~= 0 or dy ~= 0 then put(x + dx, y + dy, side or corner) end
+      end
+    end
+  end
   -- Transforming: only the box and its handles
   if s.xf then
     local b = xfBox()
@@ -1336,26 +1322,10 @@ local function addGuides(want)
     return
   end
 
-  -- Black or white, whichever stands out from what's under (x, y)
-  local function contrasting(x, y)
-    local luma, alpha = 170, 0   -- the transparent checkerboard is light
-    local k = overlayKey(s.ov, x, y)
-    if k and want[k] then luma, alpha = pixelLuma(s.sprite, want[k]) end
-    if alpha < 128 and g.bg and x >= 0 and y >= 0 and x < g.bg.width and y < g.bg.height then
-      local v = g.bg:getPixel(x, y)
-      if pc.rgbaA(v) >= 128 then
-        luma = grayOf{ r = pc.rgbaR(v), g = pc.rgbaG(v), b = pc.rgbaB(v) }
-      else
-        luma = 170
-      end
-    end
-    return luma >= 128 and g.dark or g.light
-  end
-
   for pi, p in ipairs(s.paths) do
     if pi ~= s.active then
       for _, n in ipairs(p.nodes) do
-        if g.twoTone then square(n.x, n.y, g.otherRing, g.otherCenter) else square(n.x, n.y, g.other) end
+        if g.twoTone then hollow(n.x, n.y, g.otherRing, g.otherCenter) else hollow(n.x, n.y, g.other) end
       end
     end
   end
@@ -1370,7 +1340,8 @@ local function addGuides(want)
           -- Dotted line from the point to the end of the handle
           -- (black and white dots when green isn't available)
           linePixels(n.x, n.y, hx, hy, function(x, y, j)
-            if j % 2 == 0 then
+            -- (not inside the point's hollow square)
+            if j % 2 == 0 and (abs(x - n.x) > 1 or abs(y - n.y) > 1) then
               if g.twoTone then put(x, y, j % 4 == 0 and g.dark or g.light) else put(x, y, g.handle) end
             end
           end)
@@ -1378,18 +1349,19 @@ local function addGuides(want)
         end
       end
     end
+    -- Points: hollow squares
     for i, n in ipairs(p.nodes) do
       if not g.twoTone then
-        square(n.x, n.y, i == s.selNode and g.selected or g.point)
+        hollow(n.x, n.y, i == s.selNode and g.selected or g.point)
       elseif i == s.selNode then
-        square(n.x, n.y, g.light, g.dark)   -- white outline, black center
+        hollow(n.x, n.y, g.light, g.dark)   -- white corners, black sides
       else
-        square(n.x, n.y, g.dark, g.light)   -- black outline, white center
+        hollow(n.x, n.y, g.dark, g.light)   -- black corners, white sides
       end
     end
-    -- Handle ends go on top, so short handles stay visible next to their point
+    -- Handle ends: filled squares, on top so short handles stay visible
     for _, e in ipairs(ends) do
-      put(e[1], e[2], g.twoTone and contrasting(e[1], e[2]) or g.handle)
+      if g.twoTone then square(e[1], e[2], g.dark, g.light) else square(e[1], e[2], g.handle) end
     end
   end
 end
@@ -1601,7 +1573,9 @@ local function hitTest(x, y)
         if hasHandle(n, side) and handleUsed(p, i, side) then
           local hx, hy = handlePos(n, side)
           if round(hx) ~= n.x or round(hy) ~= n.y then
-            consider(dist(x, y, hx, hy) + 0.01, { kind = "handle", path = s.active, node = i, side = side })
+            -- The whole 3x3 square of a handle end can be clicked
+            consider(dist(x, y, hx, hy) + 0.01, { kind = "handle", path = s.active, node = i, side = side },
+                     math.max(tol, 1.5))
           end
         end
       end
