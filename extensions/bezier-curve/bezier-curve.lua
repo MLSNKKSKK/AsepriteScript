@@ -22,7 +22,7 @@ local TEXT = {
     rasterizedTip = "The curve layer is now a normal layer. Edit > Undo brings the lines back.",
     layerName = "Curve",
     hint = "Bezier Curve: click to add points, drag points or handles to edit them",
-    hintDrawing = "Bezier Curve: drawing a shape (other shapes can't be grabbed). Esc, Enter or click its last point: done",
+    hintDrawing = "Bezier Curve: drawing a shape (other shapes can't be grabbed). Click its first point to close it; Esc, Enter or click its last point: done",
     help1 = "Click to add points, drag points or handles to bend.",
     help2 = "Click a line to select it, again to add a point. Del: delete the point.",
     nextShape = "Next Shape",
@@ -95,7 +95,7 @@ local TEXT = {
     rasterizedTip = "曲線レイヤーを普通のレイヤーにしました。編集 > 元に戻す で線のデータも戻せます。",
     layerName = "曲線",
     hint = "ベジェ曲線: クリックで点を追加、点やハンドルをドラッグで編集",
-    hintDrawing = "ベジェ曲線: 図形を描いています(ほかの図形はつかめません)。Esc・Enter・最後の点をクリックで終了",
+    hintDrawing = "ベジェ曲線: 図形を描いています(ほかの図形はつかめません)。始点をクリックで閉じる、Esc・Enter・最後の点をクリックで終了",
     help1 = "クリックで点を追加、点やハンドルをドラッグで曲げる",
     help2 = "線をクリックで選択(選択中なら点を追加) / Del: 点を削除",
     nextShape = "次に描く図形",
@@ -1714,12 +1714,16 @@ local function startGesture(x, y)
     local hx, hy = handlePos(s.paths[hit.path].nodes[hit.node], hit.side)
     s.press = { kind = "handle", hit = hit, before = before, sx = x, sy = y, hx = hx, hy = hy }
   elseif hit and hit.kind == "anchor" then
-    -- A click (not a drag) on the last point of the line being drawn ends drawing
-    local finishes = s.drawing and hit.path == s.active and hit.node == #s.paths[hit.path].nodes
+    -- A click (not a drag) on the last point of the line being drawn ends
+    -- drawing; on its first point, it closes the line
+    local q = s.paths[hit.path]
+    local drawn = s.drawing and hit.path == s.active
+    local finishes = drawn and hit.node == #q.nodes
+    local closes = drawn and hit.node == 1 and #q.nodes >= 2 and not q.closed
     select(hit.path, hit.node)
-    local n = s.paths[hit.path].nodes[hit.node]
+    local n = q.nodes[hit.node]
     s.press = { kind = "anchor", hit = hit, before = before, sx = x, sy = y, x = n.x, y = n.y,
-                finishes = finishes }
+                finishes = finishes, closes = closes }
   elseif hit then
     -- Clicking the line of the selected shape adds a point; clicking another
     -- shape's line, or inside a fill, only selects the shape. Dragging moves it.
@@ -1839,6 +1843,11 @@ local function endGesture(x, y, dragged)
   elseif d.kind == "xfOut" and clicked then
     -- A click outside the box ends transforming
     s.xf = nil
+    syncFields()
+  elseif d.closes and clicked then
+    -- Closed: the shape is finished (and stays selected)
+    s.paths[d.hit.path].closed = true
+    s.drawing = false
     syncFields()
   end
   pushUndo(d.before)
