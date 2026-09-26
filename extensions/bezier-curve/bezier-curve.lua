@@ -23,8 +23,6 @@ local TEXT = {
     layerName = "Curve",
     hint = "Bezier Curve: click to add points, drag points or handles to edit them",
     hintDrawing = "Bezier Curve: drawing a shape (other shapes can't be grabbed). Click its first point to close it; Esc, Enter or click its last point: done",
-    help1 = "Click to add points, drag points or handles to bend.",
-    help2 = "Click a line to select it, again to add a point. Del: delete the selected point or shape.",
     nextShape = "Next Shape",
     selectedShape = "Selected Shape",
     drawingShape = "Drawing a Shape (Esc/Enter: done)",
@@ -110,8 +108,6 @@ local TEXT = {
     layerName = "曲線",
     hint = "ベジェ曲線: クリックで点を追加、点やハンドルをドラッグで編集",
     hintDrawing = "ベジェ曲線: 図形を描いています(ほかの図形はつかめません)。始点をクリックで閉じる、Esc・Enter・最後の点をクリックで終了",
-    help1 = "クリックで点を追加、点やハンドルをドラッグで曲げる",
-    help2 = "線をクリックで選択(選択中なら点を追加) / Del: 選択中の点か図形を削除",
     nextShape = "次に描く図形",
     selectedShape = "選択中の図形",
     drawingShape = "図形を描画中(Esc / Enter で終了)",
@@ -2457,11 +2453,8 @@ openPanel = function()
     end
     return dlg
   end
-  dlg:label{ text = T.help1 }
-     :newrow()
-     :label{ text = T.help2 }
-     -- Shapes: new, delete, copy and paste
-     :button{ id = "newLine", text = T.newShape,
+  -- Shapes: new, place, delete, copy, paste and stacking order
+  dlg:button{ id = "newLine", text = T.newShape,
               onclick = whenEditing(function(s)
                 -- Until drawing ends, clicks only draw the new line (other lines can't be grabbed)
                 s.xf, s.placing = nil, nil
