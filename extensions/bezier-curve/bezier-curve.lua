@@ -417,24 +417,94 @@ local function renderPaths(sprite, paths)
   return img
 end
 
+-- The palette entry closest to a color (never the transparent one)
+local function nearestIndex(sprite, r, g, b)
+  local pal = sprite.palettes[1]
+  local best, bestD = 0, math.huge
+  for i = 0, #pal - 1 do
+    if i ~= sprite.transparentColor then
+      local c = pal:getColor(i)
+      local d = (c.red - r) ^ 2 + (c.green - g) ^ 2 + (c.blue - b) ^ 2
+      if d < bestD then best, bestD = i, d end
+    end
+  end
+  return best
+end
+
 -- Pixel value of a guide color in the sprite's color mode
 local function guidePixel(sprite, r, g, b)
   if sprite.colorMode == ColorMode.INDEXED then
-    -- The closest palette entry
-    local pal = sprite.palettes[1]
-    local best, bestD = 0, math.huge
-    for i = 0, #pal - 1 do
-      if i ~= sprite.transparentColor then
-        local c = pal:getColor(i)
-        local d = (c.red - r) ^ 2 + (c.green - g) ^ 2 + (c.blue - b) ^ 2
-        if d < bestD then best, bestD = i, d end
-      end
-    end
-    return best
+    return nearestIndex(sprite, r, g, b)
   elseif sprite.colorMode == ColorMode.GRAY then
     return pc.graya(grayOf{ r = r, g = g, b = b }, 255)
   end
   return pc.rgba(r, g, b, 255)
+end
+
+-- Brightness (0-255) and alpha of a pixel value in the sprite's color mode
+local function pixelLuma(sprite, v)
+  if sprite.colorMode == ColorMode.GRAY then
+    return pc.grayaV(v), pc.grayaA(v)
+  elseif sprite.colorMode == ColorMode.INDEXED then
+    if v == sprite.transparentColor then return 0, 0 end
+    local c = sprite.palettes[1]:getColor(v)
+    return grayOf{ r = c.red, g = c.green, b = c.blue }, c.alpha
+  end
+  return grayOf{ r = pc.rgbaR(v), g = pc.rgbaG(v), b = pc.rgbaB(v) }, pc.rgbaA(v)
+end
+
+-- Colors of the guides. In RGB (or Indexed with a green in the palette) they
+-- are bright green. Grayscale and other palettes can't show green, so the
+-- guides are black and white there: points get a two-tone outline, and
+-- handle ends take whichever of black or white stands out from the picture.
+local function guideStyle(sprite, layer, frameNumber)
+  local mode = sprite.colorMode
+  local green = mode == ColorMode.RGB
+  if mode == ColorMode.INDEXED then
+    local c = sprite.palettes[1]:getColor(nearestIndex(sprite, 0, 255, 0))
+    green = c.green >= 128 and c.green - math.max(c.red, c.blue) >= 64
+  end
+  if green then
+    return {
+      point = guidePixel(sprite, 0, 255, 0),        -- points of the selected line
+      selected = guidePixel(sprite, 200, 255, 200), -- the selected point
+      handle = guidePixel(sprite, 0, 255, 0),       -- handles
+      other = guidePixel(sprite, 0, 170, 0),        -- points of the other lines
+    }
+  end
+
+  local style = { twoTone = true }
+  if mode == ColorMode.GRAY then
+    style.dark, style.light = pc.graya(0, 255), pc.graya(255, 255)
+    style.otherRing, style.otherCenter = pc.graya(64, 255), pc.graya(200, 255)
+  else
+    -- The darkest and lightest palette entries, and two in between
+    local pal = sprite.palettes[1]
+    local dark, light, darkL, lightL = 0, 0, math.huge, -1
+    for i = 0, #pal - 1 do
+      if i ~= sprite.transparentColor then
+        local c = pal:getColor(i)
+        local l = grayOf{ r = c.red, g = c.green, b = c.blue }
+        if l < darkL then dark, darkL = i, l end
+        if l > lightL then light, lightL = i, l end
+      end
+    end
+    style.dark, style.light = dark, light
+    style.otherRing = nearestIndex(sprite, 64, 64, 64)
+    style.otherCenter = nearestIndex(sprite, 200, 200, 200)
+  end
+
+  -- The picture without the curve layer, to pick black or white for single
+  -- pixels. (Hiding a layer outside a transaction adds no undo step.)
+  pcall(function()
+    local bg = Image(sprite.width, sprite.height, ColorMode.RGB)
+    local visible = layer.isVisible
+    layer.isVisible = false
+    bg:drawSprite(sprite, frameNumber, Point(0, 0))
+    layer.isVisible = visible
+    style.bg = bg
+  end)
+  return style
 end
 
 ------------------------------------------------------------------------
@@ -776,14 +846,33 @@ local function addGuides(want)
     local k = overlayKey(s.ov, x, y)
     if k then want[k] = v end
   end
-  local function square(x, y, v)
+  -- A 3x3 square: `ring` around, `center` in the middle
+  local function square(x, y, ring, center)
     for dy = -1, 1 do
-      for dx = -1, 1 do put(x + dx, y + dy, v) end
+      for dx = -1, 1 do put(x + dx, y + dy, (dx == 0 and dy == 0) and (center or ring) or ring) end
     end
   end
+  -- Black or white, whichever stands out from what's under (x, y)
+  local function contrasting(x, y)
+    local luma, alpha = 170, 0   -- the transparent checkerboard is light
+    local k = overlayKey(s.ov, x, y)
+    if k and want[k] then luma, alpha = pixelLuma(s.sprite, want[k]) end
+    if alpha < 128 and g.bg and x >= 0 and y >= 0 and x < g.bg.width and y < g.bg.height then
+      local v = g.bg:getPixel(x, y)
+      if pc.rgbaA(v) >= 128 then
+        luma = grayOf{ r = pc.rgbaR(v), g = pc.rgbaG(v), b = pc.rgbaB(v) }
+      else
+        luma = 170
+      end
+    end
+    return luma >= 128 and g.dark or g.light
+  end
+
   for pi, p in ipairs(s.paths) do
     if pi ~= s.active then
-      for _, n in ipairs(p.nodes) do square(n.x, n.y, g.other) end
+      for _, n in ipairs(p.nodes) do
+        if g.twoTone then square(n.x, n.y, g.otherRing, g.otherCenter) else square(n.x, n.y, g.other) end
+      end
     end
   end
   local p = s.paths[s.active]
@@ -795,18 +884,29 @@ local function addGuides(want)
           local hx, hy = handlePos(n, side)
           hx, hy = round(hx), round(hy)
           -- Dotted line from the point to the end of the handle
+          -- (black and white dots when green isn't available)
           linePixels(n.x, n.y, hx, hy, function(x, y, j)
-            if j % 2 == 0 then put(x, y, g.handle) end
+            if j % 2 == 0 then
+              if g.twoTone then put(x, y, j % 4 == 0 and g.dark or g.light) else put(x, y, g.handle) end
+            end
           end)
           ends[#ends + 1] = { hx, hy }
         end
       end
     end
     for i, n in ipairs(p.nodes) do
-      square(n.x, n.y, i == s.selNode and g.selected or g.point)
+      if not g.twoTone then
+        square(n.x, n.y, i == s.selNode and g.selected or g.point)
+      elseif i == s.selNode then
+        square(n.x, n.y, g.light, g.dark)   -- white outline, black center
+      else
+        square(n.x, n.y, g.dark, g.light)   -- black outline, white center
+      end
     end
     -- Handle ends go on top, so short handles stay visible next to their point
-    for _, e in ipairs(ends) do put(e[1], e[2], g.handle) end
+    for _, e in ipairs(ends) do
+      put(e[1], e[2], g.twoTone and contrasting(e[1], e[2]) or g.handle)
+    end
   end
 end
 
@@ -1214,12 +1314,7 @@ local function startSession(force)
     paths = paths, original = original,
     active = nil, selNode = nil, press = nil,
     undoStack = {}, redoStack = {}, lastMerge = nil,
-    guide = {
-      point = guidePixel(sprite, 0, 255, 0),        -- points of the selected line
-      selected = guidePixel(sprite, 200, 255, 200), -- the selected point
-      handle = guidePixel(sprite, 0, 255, 0),       -- handles
-      other = guidePixel(sprite, 0, 170, 0),        -- points of the other lines
-    },
+    guide = guideStyle(sprite, layer, f),
   }
   S = s
   lastSkip = nil
