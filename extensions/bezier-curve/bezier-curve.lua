@@ -2137,9 +2137,6 @@ openPanel = function()
                 local p, i = s.paths[s.active], s.selNode
                 edit(function() toggleRound(p, i) end)
               end) }
-     :newrow()
-     :button{ id = "undo", text = T.undo, onclick = whenEditing(undo) }
-     :button{ id = "redo", text = T.redo, onclick = whenEditing(redo) }
      :separator{ id = "xfSep", text = T.transformAll }
      :button{ id = "transform", text = T.transformBox, onclick = whenEditing(toggleTransform) }
      :button{ id = "numeric", text = T.numeric, onclick = whenEditing(numericTransform) }
@@ -2156,6 +2153,9 @@ openPanel = function()
      :newrow()
      :check{ id = "keepRatio", text = T.keepRatio, selected = prefs.keepRatio == true,
              onclick = function() prefs.keepRatio = dlg.data.keepRatio end }
+     :separator{}
+     :button{ id = "undo", text = T.undo, onclick = whenEditing(undo) }
+     :button{ id = "redo", text = T.redo, onclick = whenEditing(redo) }
      :separator{}
      :button{ id = "stop", text = T.stop, onclick = stopEditing }
      :button{ id = "rasterize", text = T.rasterize,

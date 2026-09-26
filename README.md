@@ -226,8 +226,8 @@ The panel's first section, **Selected Shape**, holds the settings of the selecte
 | **New Shape** | Finishes the current shape, so the next click starts a new one. |
 | **Delete Shape** / **Delete Point** | Deletes the selected shape / point. |
 | **Round/Sharp** | Switches the selected point between round (with handles) and sharp. |
-| **Undo** / **Redo** | Undo / redo your changes to the shapes. |
 | **Transform Box**, **Numeric...**, **Flip**, **Rotate**, **Keep proportions** | Transform the shapes (see below). |
+| **Undo** / **Redo** | Undo / redo your changes to the shapes. |
 | **Stop Editing** | Stops editing the layer so you can use Aseprite's tools on it (for example the Move tool). Closing the panel does the same. Selecting the layer again, or **Layer > Edit Curves**, starts editing again. |
 | **Rasterize** | Turns the curve layer into a normal layer (see below). |
 
