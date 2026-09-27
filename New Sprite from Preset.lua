@@ -13,7 +13,13 @@ local DEFAULT_PRESETS = {
   { name = "64px", w = 64, h = 64 },
 }
 
+local MAX_SIZE = 65535
+
 local presets = {}
+
+local function validSize(w, h)
+  return w >= 1 and h >= 1 and w <= MAX_SIZE and h <= MAX_SIZE
+end
 
 local function savePresets()
   local f = io.open(PRESET_FILE, "w")
@@ -41,7 +47,11 @@ local function loadPresets()
   for line in f:lines() do
     local name, w, h = line:match("^%s*(.-)%s*,%s*(%d+)%s*,%s*(%d+)%s*$")
     if name and name ~= "" and not name:find("^#") then
-      table.insert(presets, { name = name, w = tonumber(w), h = tonumber(h) })
+      w, h = tonumber(w), tonumber(h)
+      -- Skip sizes Aseprite can't create (e.g. typos made while editing the file)
+      if validSize(w, h) then
+        table.insert(presets, { name = name, w = w, h = h })
+      end
     end
   end
   f:close()
@@ -71,14 +81,39 @@ local MODES = {
   ["Indexed"] = ColorMode.INDEXED,
 }
 
+-- Indexed images store palette indexes, so find the entry closest to the color
+local function nearestIndex(palette, color)
+  local best, bestDist = 0, math.huge
+  for i = 0, #palette - 1 do
+    local c = palette:getColor(i)
+    local d = (c.red - color.red) ^ 2 + (c.green - color.green) ^ 2 + (c.blue - color.blue) ^ 2
+    if d < bestDist then
+      best, bestDist = i, d
+    end
+  end
+  return best
+end
+
 local function createSprite(p, modeName, bgName)
-  local sprite = Sprite(p.w, p.h, MODES[modeName])
+  local mode = MODES[modeName]
+  local sprite = Sprite(p.w, p.h, mode)
+  app.sprite = sprite
+  -- Sprites made by scripts start with an all-black palette, so use the default
+  -- palette like File > New does (Grayscale sprites already get a gray ramp)
+  if mode ~= ColorMode.GRAYSCALE and app.defaultPalette then
+    sprite:setPalette(app.defaultPalette)
+  end
   if bgName ~= "Transparent" then
     local color = (bgName == "White") and Color{ r = 255, g = 255, b = 255 } or app.bgColor
-    local img = Image(sprite.spec)
-    img:clear(color)
-    sprite.cels[1].image = img
+    -- Make the background first, then fill it, so the color is used as is
     app.command.BackgroundFromLayer()
+    local img = Image(sprite.spec)
+    if mode == ColorMode.INDEXED then
+      img:clear(nearestIndex(sprite.palettes[1], color))
+    else
+      img:clear(Color{ r = color.red, g = color.green, b = color.blue })
+    end
+    sprite.cels[1].image = img
   end
   app.refresh()
 end
@@ -121,7 +156,12 @@ local function addPreset()
     app.alert("Please enter a name.")
     return
   end
-  if w < 1 or h < 1 or w > 65535 or h > 65535 then
+  -- Lines starting with # are comments in the preset file
+  if name:find("^#") then
+    app.alert("Names can't start with #.")
+    return
+  end
+  if not validSize(w, h) then
     app.alert("Width and height must be between 1 and 65535.")
     return
   end

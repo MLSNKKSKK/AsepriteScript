@@ -86,10 +86,19 @@ if opts.file == "" or not app.fs.isFile(opts.file) then
   return
 end
 
+-- Layers inside a locked group can't be edited either
+local function isEditable(layer)
+  while layer ~= target do
+    if not layer.isEditable then return false end
+    layer = layer.parent
+  end
+  return true
+end
+
 local src = app.layer
 if opts.dest == DEST_CURRENT
-  and (not src or src.isGroup or src.isTilemap or src.isReference or not src.isEditable) then
-  app.alert("To import into the active layer, select a regular layer that isn't locked.")
+  and (not src or src.isGroup or src.isTilemap or src.isReference or not isEditable(src)) then
+  app.alert("To import into the active layer, select a regular layer that isn't locked\n(and isn't in a locked group).")
   return
 end
 

@@ -12,7 +12,13 @@ local DEFAULT_PRESETS = {
   { name = "64px", w = 64, h = 64 },
 }
 
+local MAX_SIZE = 65535
+
 local presets = {}
+
+local function validSize(w, h)
+  return w >= 1 and h >= 1 and w <= MAX_SIZE and h <= MAX_SIZE
+end
 
 local function savePresets()
   local f = io.open(PRESET_FILE, "w")
@@ -40,7 +46,11 @@ local function loadPresets()
   for line in f:lines() do
     local name, w, h = line:match("^%s*(.-)%s*,%s*(%d+)%s*,%s*(%d+)%s*$")
     if name and name ~= "" and not name:find("^#") then
-      table.insert(presets, { name = name, w = tonumber(w), h = tonumber(h) })
+      w, h = tonumber(w), tonumber(h)
+      -- Aseprite で作れないサイズ(手で書き換えたときの打ち間違いなど)は読み飛ばす
+      if validSize(w, h) then
+        table.insert(presets, { name = name, w = w, h = h })
+      end
     end
   end
   f:close()
@@ -70,14 +80,39 @@ local MODES = {
   ["インデックス"] = ColorMode.INDEXED,
 }
 
+-- インデックス画像はパレット番号で色を持つので、いちばん近い色の番号を探す
+local function nearestIndex(palette, color)
+  local best, bestDist = 0, math.huge
+  for i = 0, #palette - 1 do
+    local c = palette:getColor(i)
+    local d = (c.red - color.red) ^ 2 + (c.green - color.green) ^ 2 + (c.blue - color.blue) ^ 2
+    if d < bestDist then
+      best, bestDist = i, d
+    end
+  end
+  return best
+end
+
 local function createSprite(p, modeName, bgName)
-  local sprite = Sprite(p.w, p.h, MODES[modeName])
+  local mode = MODES[modeName]
+  local sprite = Sprite(p.w, p.h, mode)
+  app.sprite = sprite
+  -- スクリプトで作ったスプライトはパレットが全部黒なので、ファイル > 新規作成 と同じく
+  -- デフォルトパレットを使う(グレースケールは最初から灰色の階調になっている)
+  if mode ~= ColorMode.GRAYSCALE and app.defaultPalette then
+    sprite:setPalette(app.defaultPalette)
+  end
   if bgName ~= "透明" then
     local color = (bgName == "白") and Color{ r = 255, g = 255, b = 255 } or app.bgColor
-    local img = Image(sprite.spec)
-    img:clear(color)
-    sprite.cels[1].image = img
+    -- 先に背景レイヤーにしてから塗ると、選んだ色がそのまま使われる
     app.command.BackgroundFromLayer()
+    local img = Image(sprite.spec)
+    if mode == ColorMode.INDEXED then
+      img:clear(nearestIndex(sprite.palettes[1], color))
+    else
+      img:clear(Color{ r = color.red, g = color.green, b = color.blue })
+    end
+    sprite.cels[1].image = img
   end
   app.refresh()
 end
@@ -119,7 +154,12 @@ local function addPreset()
     app.alert("名前を入れてください。")
     return
   end
-  if w < 1 or h < 1 or w > 65535 or h > 65535 then
+  -- プリセットファイルでは # で始まる行はコメントになる
+  if name:find("^#") then
+    app.alert("名前の先頭に # は使えません。")
+    return
+  end
+  if not validSize(w, h) then
     app.alert("幅と高さは 1〜65535 にしてください。")
     return
   end

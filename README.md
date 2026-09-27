@@ -47,7 +47,7 @@ Run **File > Scripts > New Sprite from Preset**.
 | Field | Description |
 | --- | --- |
 | **Size** | The preset to use. |
-| **Add...** | Adds a new preset. The width and height start from the selected preset. A preset with the same name is replaced. |
+| **Add...** | Adds a new preset. The width and height start from the selected preset. A preset with the same name is replaced. Names can't start with `#`. |
 | **Remove** | Removes the selected preset (asks first). |
 | **Color Mode** | RGB, Grayscale or Indexed. |
 | **Background** | Transparent, White, or Background Color (the background color currently set in Aseprite's color bar). |
@@ -73,7 +73,7 @@ The file is created with these default presets the first time the script runs:
 64px,64,64
 ```
 
-Each line is `name,width,height`. Lines starting with `#` are ignored. You can edit this file in any text editor; the changes show up the next time you run the script.
+Each line is `name,width,height`. Lines starting with `#` are ignored, and so are lines whose width or height isn't between 1 and 65535. You can edit this file in any text editor; the changes show up the next time you run the script.
 
 ## Import GIF as Layer
 
@@ -92,7 +92,7 @@ Open an RGB sprite (to convert one, use **Sprite > Color Mode > RGB Color**), th
 | Field | Description |
 | --- | --- |
 | **GIF File** | The GIF to import. |
-| **Import Into** | **New Layer**, or **Active Layer (draw on top)** to draw the GIF over the art already on the active layer. The active layer must be a regular layer that isn't locked (not a group, tilemap or reference layer). |
+| **Import Into** | **New Layer**, or **Active Layer (draw on top)** to draw the GIF over the art already on the active layer. The active layer must be a regular layer that isn't locked or inside a locked group (not a group, tilemap or reference layer). |
 | **Start At** | Which sprite frame the GIF's first frame goes on: **Current Frame** or **Frame 1**. |
 | **Size** | **Actual Size**: pixel for pixel.<br>**Fit to Canvas**: the whole GIF fits inside the canvas (may leave empty space).<br>**Fill Canvas**: the GIF covers the whole canvas (parts may extend past the edges).<br>**Stretch to Canvas**: matches the canvas size exactly, ignoring the aspect ratio. |
 | **Resize Method** | **Nearest Neighbor** keeps pixels sharp (best for pixel art); **Bilinear** is smooth. Only used when the GIF is resized. |
@@ -103,6 +103,8 @@ Open an RGB sprite (to convert one, use **Sprite > Color Mode > RGB Color**), th
 Click **Import**.
 
 If the active layer has linked cels, only the cels the GIF is drawn on are unlinked, so the other frames don't change.
+
+The script opens the GIF to read its frames, so Aseprite also adds it to **File > Open Recent**.
 
 ### Command line
 
@@ -120,7 +122,7 @@ When run without the UI, pass the options with `--script-param` (before `--scrip
 Replaces one color with another in every layer and every frame of the sprite at once.
 
 - Includes layers inside groups and hidden layers
-- Skips locked, tilemap and reference layers
+- Skips locked layers (including layers inside a locked group), tilemap and reference layers
 - Each pixel keeps its original alpha, so semi-transparent pixels stay semi-transparent
 - The whole replacement is a single undo step (**Edit > Undo** / Ctrl+Z)
 
@@ -148,7 +150,7 @@ Creates an "effect layer" right above the active layer: the same shape as the ac
 
 ### Usage
 
-Open an RGB sprite (to convert one, use **Sprite > Color Mode > RGB Color**), select a regular layer (not a group or tilemap), then run **File > Scripts > Create Effect Layer**.
+Open an RGB sprite (to convert one, use **Sprite > Color Mode > RGB Color**), select a regular layer (not a group, tilemap or reference layer), then run **File > Scripts > Create Effect Layer**.
 
 | Field | Description |
 | --- | --- |
