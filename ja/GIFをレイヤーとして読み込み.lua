@@ -85,10 +85,19 @@ if opts.file == "" or not app.fs.isFile(opts.file) then
   return
 end
 
+-- ロックされたグループの中のレイヤーも編集できない
+local function isEditable(layer)
+  while layer ~= target do
+    if not layer.isEditable then return false end
+    layer = layer.parent
+  end
+  return true
+end
+
 local src = app.layer
 if opts.dest == DEST_CURRENT
-  and (not src or src.isGroup or src.isTilemap or src.isReference or not src.isEditable) then
-  app.alert("読み込み先には、ロックされていない普通のレイヤーを選んでください。")
+  and (not src or src.isGroup or src.isTilemap or src.isReference or not isEditable(src)) then
+  app.alert("読み込み先には、ロックされていない普通のレイヤーを選んでください\n(ロックされたグループの中のレイヤーも使えません)。")
   return
 end
 

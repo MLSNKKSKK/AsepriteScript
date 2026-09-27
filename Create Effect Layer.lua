@@ -16,8 +16,8 @@ if sprite.colorMode ~= ColorMode.RGB then
 end
 
 local src = app.layer
-if not src or src.isGroup or src.isTilemap then
-  app.alert("Please select a single regular layer (groups and tilemaps aren't supported).")
+if not src or src.isGroup or src.isTilemap or src.isReference then
+  app.alert("Please select a single regular layer (groups, tilemaps and reference layers aren't supported).")
   return
 end
 

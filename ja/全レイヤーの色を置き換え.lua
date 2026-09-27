@@ -1,6 +1,6 @@
 -- 全レイヤー・全フレームの指定した色を別の色に置き換える
 -- ・グループの中や非表示のレイヤーも対象
--- ・ロック中・タイルマップ・参照レイヤーは対象外
+-- ・ロック中(ロックされたグループの中も含む)・タイルマップ・参照レイヤーは対象外
 -- ・元のピクセルの透明度は残す(置き換え後の色が半透明なら、その分だけ薄くなる)
 -- ・1回の Ctrl+Z で元に戻せる
 
@@ -35,22 +35,23 @@ if app.isUIAvailable then
   opts = dlg.data
 end
 
--- 対象レイヤーを集める(グループは中身を展開)
+-- 対象レイヤーを集める(グループは中身を展開。ロックされたグループの中はロック扱い)
 local targets = {}
 local skipped = 0
 
-local function collect(layers)
+local function collect(layers, groupLocked)
   for _, layer in ipairs(layers) do
+    local locked = groupLocked or not layer.isEditable
     if layer.isGroup then
-      collect(layer.layers)
-    elseif layer.isTilemap or layer.isReference or not layer.isEditable then
+      collect(layer.layers, locked)
+    elseif layer.isTilemap or layer.isReference or locked then
       skipped = skipped + 1
     else
       table.insert(targets, layer)
     end
   end
 end
-collect(sprite.layers)
+collect(sprite.layers, false)
 
 local pc = app.pixelColor
 local rgba, rOf, gOf, bOf, aOf = pc.rgba, pc.rgbaR, pc.rgbaG, pc.rgbaB, pc.rgbaA

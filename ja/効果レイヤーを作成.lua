@@ -15,8 +15,8 @@ if sprite.colorMode ~= ColorMode.RGB then
 end
 
 local src = app.layer
-if not src or src.isGroup or src.isTilemap then
-  app.alert("普通のレイヤーを1つ選んでください(グループとタイルマップには使えません)。")
+if not src or src.isGroup or src.isTilemap or src.isReference then
+  app.alert("普通のレイヤーを1つ選んでください(グループ・タイルマップ・参照レイヤーには使えません)。")
   return
 end
 

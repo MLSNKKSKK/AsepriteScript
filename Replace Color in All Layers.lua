@@ -1,7 +1,8 @@
 -- Replace Color in All Layers
 -- Replaces one color with another in every layer and every frame.
 -- * Layers inside groups and hidden layers are included.
--- * Locked, tilemap and reference layers are skipped.
+-- * Locked layers (including those in locked groups), tilemap and reference layers
+--   are skipped.
 -- * Each pixel keeps its original alpha (if the new color is semi-transparent,
 --   the pixel gets that much more transparent).
 -- * A single Ctrl+Z undoes the whole replacement.
@@ -37,22 +38,23 @@ if app.isUIAvailable then
   opts = dlg.data
 end
 
--- Collect the target layers (looking inside groups)
+-- Collect the target layers (looking inside groups; layers in a locked group count as locked)
 local targets = {}
 local skipped = 0
 
-local function collect(layers)
+local function collect(layers, groupLocked)
   for _, layer in ipairs(layers) do
+    local locked = groupLocked or not layer.isEditable
     if layer.isGroup then
-      collect(layer.layers)
-    elseif layer.isTilemap or layer.isReference or not layer.isEditable then
+      collect(layer.layers, locked)
+    elseif layer.isTilemap or layer.isReference or locked then
       skipped = skipped + 1
     else
       table.insert(targets, layer)
     end
   end
 end
-collect(sprite.layers)
+collect(sprite.layers, false)
 
 local pc = app.pixelColor
 local rgba, rOf, gOf, bOf, aOf = pc.rgba, pc.rgbaR, pc.rgbaG, pc.rgbaB, pc.rgbaA
